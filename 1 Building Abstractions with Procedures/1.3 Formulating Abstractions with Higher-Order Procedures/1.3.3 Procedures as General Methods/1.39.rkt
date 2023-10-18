@@ -10,12 +10,12 @@
   (iter 0 0))
 
 (define (tan-cf x k)
-  (cont-frac 
+  (exact->inexact (cont-frac 
     (lambda (i) 
       (if (= 1 i)
         x
         (- (* x x))))
     (lambda (i) 
-      (- 1 (* 2 i)))
-    k))
+      (dec (* 2 i)))
+    k)))
 
