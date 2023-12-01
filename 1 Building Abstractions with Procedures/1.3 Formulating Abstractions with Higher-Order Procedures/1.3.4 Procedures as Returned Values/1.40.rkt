@@ -38,12 +38,8 @@
                guess))
 
 (define (cubic a b c)
-  (define (t x k)
-    (if (= k 0) 
-      1
-      (* x (t x (- k 1)))))
-  (lambda (x) (+ (* 1 (t x 3))
-                 (* a (t x 2))
-                 (* b (t x 1))
-                 (* c (t x 0)))))
+  (lambda (x) (+ (* 1 (expt x 3))
+                 (* a (expt x 2))
+                 (* b (expt x 1))
+                 (* c (expt x 0)))))
 
