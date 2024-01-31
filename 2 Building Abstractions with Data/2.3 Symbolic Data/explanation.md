@@ -618,5 +618,156 @@ quote
 
 Ну а отсюда уже достаточно легко определить конструкторы, надо просто финальное выржение подменить на соответствующие вызовы ```join-by```.
 
+# Representing sets
+
 ## 2.59
 
+```racket
+#lang sicp
+
+(define (element-of-set? x set)
+  (cond ((null? set) false)
+        ((equal? x (car set)) true)
+        (else (element-of-set? x (cdr set)))))
+
+(define (adjoin-set x set)
+  (if (element-of-set? x set)
+      set
+      (cons x set)))
+
+(define (intersection-set set1 set2)
+  (cond ((or (null? set1) (null? set2))
+         '())
+        ((element-of-set? (car set1) set2)
+         (cons (car set1)
+               (intersection-set (cdr set1)
+                                 set2)))
+        (else (intersection-set (cdr set1)
+                                set2))))
+
+(define (union-set set1 set2)
+  (if (null? set2)
+    set1
+    (union-set (adjoin-set (car set2)
+                           set1)
+               (cdr set2))))
+```
+
+Ну простая рекурсивная стратегия: если второй пуст, то точно возвращаем первый.
+Во всех остальных случаях сводим задачу к тому, чтобы зааджойнить первый сет ко второму.
+
+## 2.60
+
+```racket
+#lang sicp
+
+(define (element-of-set? x set)
+  (cond ((null? set) false)
+        ((equal? x (car set)) true)
+        (else (element-of-set? x (cdr set)))))
+
+(define (adjoin-set x set)
+  (cons x set))
+
+(define (intersection-set set1 set2)
+  (if (or (null? set1) 
+          (null? set2))
+    '()
+    (let ((intersected (intersection-set 
+                        (cdr set1)
+                        set2))
+          (elem (car set1)))
+      (if (and (element-of-set? elem set2)
+               (not (element-of-set? elem intersected)))
+        (cons elem intersected)
+        intersected))))
+
+(define (drop-duplicates set)
+  (intersection-set set set))
+
+(define (union-set set1 set2)
+  (append set1 set2))
+```
+
+У нас практически всё упростилось, потому что теперь объединение это простая конкатенация. Единственное что не поменялось, так это пересечение. Ну и так как там всё равно n^2, я решил дропнуть заодно дубликаты в пересечении. За что бесплатно получил ```drop-duplicates``` метод, который тоже за n^2 работает.
+
+Когда подобную реализацию стоит использовать? Ну в том случае если у нас не очень частые пересечения. Либо данные изначально мы знаем, что достаточно редко повторяются. Казалось бы в чём смысл, а в том, что если мы знаем, что данные достаточно рандомные, то смысл нам избегать каждый дубликат, их будет не очень много.
+
+Из минусов, у нас большие затраты по памяти, объедини 3 одинаковых сета и получишь бессмысленную трату памяти в 3 раза большую, чем у предыдущего варианта. Опять же поэтому такой вариант стоит предпочесть для в достаточной мере рандомных данных.
+
+## 2.61
+
+```racket
+#lang sicp
+
+(define (element-of-set? x set)
+  (cond ((null? set) false)
+        ((= x (car set)) true)
+        ((< x (car set)) false)
+        (else (element-of-set? x (cdr set)))))
+
+(define (adjoin-set x set)
+  (cond ((null? set) (cons x set))
+        ((= x (car set)) set)
+        ((< x (car set)) (cons x set))
+        (else (cons (car set)
+                    (adjoin-set x (cdr set))))))
+```
+
+Ну тут всё до жути похоже на ```element-of-set```, поэтому как-то специально рассматривать я не буду. "В среднем", ну то есть если у нас рандомный инпут, ```n/2``` получается операций.
+
+## 2.62
+
+```racket
+#lang sicp
+
+(define (element-of-set? x set)
+  (cond ((null? set) false)
+        ((= x (car set)) true)
+        ((< x (car set)) false)
+        (else (element-of-set? x (cdr set)))))
+
+(define (adjoin-set x set)
+  (cond ((null? set) (cons x set))
+        ((= x (car set)) set)
+        ((< x (car set)) (cons x set))
+        (else (cons (car set)
+                    (adjoin-set x (cdr set))))))
+
+(define (intersection-set set1 set2)
+  (if (or (null? set1) (null? set2))
+      '()
+      (let ((x1 (car set1)) (x2 (car set2)))
+        (cond ((= x1 x2)
+               (cons x1 (intersection-set 
+                         (cdr set1)
+                         (cdr set2))))
+              ((< x1 x2) (intersection-set 
+                          (cdr set1) 
+                          set2))
+              ((< x2 x1) (intersection-set 
+                          set1 
+                          (cdr set2)))))))
+
+(define (union-set set1 set2)
+  (if (or (null? set1) (null? set2))
+      (append set1 set2)
+      (let ((x1 (car set1)) (x2 (car set2)))
+        (cond ((= x1 x2)
+               (cons x1 (union-set 
+                         (cdr set1)
+                         (cdr set2))))
+              ((< x1 x2)
+               (cons x1 (union-set 
+                          (cdr set1) 
+                          set2))) 
+              ((> x1 x2)
+               (cons x2 (union-set 
+                          set1 
+                          (cdr set2))))))))
+```
+
+Здесь уже мы видим симметрию с ```intersect```.
+Ну почему O(n), потому что каждый раз вызывается ровно одна рекурсивная операция, при этом при обратном движении рекурсии просто добавляется в хвост операция константного времени исполнения.
+
+## 2.63
