@@ -770,4 +770,735 @@ quote
 Здесь уже мы видим симметрию с ```intersect```.
 Ну почему O(n), потому что каждый раз вызывается ровно одна рекурсивная операция, при этом при обратном движении рекурсии просто добавляется в хвост операция константного времени исполнения.
 
+## AVL деревья
+
+Я решил немного ерундой позаниматься и сделать AVL дерево.
+Книга нас об этом не просит, она как бы упоминает, что это возможно (деревья балансировать), но не более того.
+
+Раньше я уже писал AVL дерево на плюсах (и получилось на самом деле не так душно как мне казалось).
+Теперь вот попробую на scheme.
+
+Сначала я предлагаю немного поменять ```adjoin-set```, на следующее:
+```racket
+(define (adjoin-set x set)
+  (define alter AVL-balance)
+  (define (adjoin-x set) (adjoin-set x set))
+  (define (default)
+    (cond ((null? set) (make-tree x '() '()))
+          ((= x (entry set)) set)
+          ((< x (entry set))
+           ((on-left-branch adjoin-x) set))
+          ((> x (entry set))
+           ((on-right-branch adjoin-x) set))))
+  (alter (default)))
+```
+
+А на место ```AVL-balance``` мы пока поставим заглушку такого вида:
+```racket
+(define AVL-balance idenity)
+```
+
+Ну, пока мы ничего не меняли, ничего и не должно поменяться. 
+Тем не менее, мы хотим после каждой вставки в множество перебалансировать дерево.
+
+### Что такое AVL дерево? 
+
+И давайте я кратко вас ознакомлю с идеей AVL дерева. Ну суть очень простая:
+Давайте дерево считать сбалансированным, если дети сбалансированы и высота детей отличается не более чем на 1.
+
+```|(height left) - (height right)| < 1```
+
+Почему дерево получается действительно сбалансированным? То есть его высота порядка O(log n), где n количество элементов в дереве.
+
+Ну давайте это докажем: рассмотрим AVL-дерево высоты h. 
+И давайте заведем N(h), которое будет числом, самого минимального AVL дерева такой высоты.
+
+Ну условно для одной и той же высоты есть несколько вариантов AVL деревьев, ну например:
+
+```
+     4         4
+    / \       / \
+   3   5     3   5
+  / \       / \   \
+ 1   2     1   2   6
+```
+
+Оба дерева валидные AVL деревья, у обоих одна и та же высота, но мы рассматриваем деревья с минимальным количеством элементов. В случае h = 3 это например N(3) = 4.
+
+```
+     3  
+    / \ 
+   2   4
+  /     
+ 1      
+```
+
+У нашего дерева оба поддерева тоже AVL деревья, причем если наше имело высоту h, то поддеревья могут принимать два варианта: {h-1, h-1}, {h-2, h-1}.
+
+В любом случае получаем следующее соотношение:
+```
+N(h) = 1 + min(N(h - 1) + N(h - 2), N(h - 1) + N(h - 1))
+```
+
+Интуитивно понятно, что N(h) вещь таки монотонная, поэтому давайте это проясним.
+```
+N(1) = 1
+N(2) = 2
+```
+
+Предположим, что мы доказали до шага h. Но тогда
+```
+N(h) = 1 + N(h - 1) + N(h - 2)
+```
+
+И шаг N(h + 1) тривиально проверяется:
+```
+N(h + 1) - N(h) = N(h) - N(h - 2) > 0
+```
+
+Следовательно на самом деле N(h) можно выразить как:
+```
+N(h) = 1 + N(h - 1) + N(h - 2)
+```
+
+На самом деле уже отсюда можно поупражнятся в решении уравнений с линейной рекурсией.
+Но я воспользуюсь [maxima](https://maxima.sourceforge.io/ru/index.html).
+
+```maxima
+load("solve_rec")$
+rec: N[h] = 2 * N[h - 1] - N[h - 3];
+solve_rec(rec, N[0] = 0, N[1] = 1, N[2] = 2, N[h]);
+```
+
+И получить результат:
+```
+N[h]=-((sqrt(5)-1)^h*(3*sqrt(5)-5)*2^(-h-1)*(-1)^h)/5+((sqrt(5)+1)^h*(3*sqrt(5)+5)*2^(-h-1))/5-1
+N[h] = 1/10 ((5 - 3 sqrt(5)) (-ϕ)^-n + (5 + 3 sqrt(5)) ϕ^n - 10)
+```
+
+Который можно много раз попреобразовывать, чтобы получить:
+```
+N[h] + 1 = 1/10 ((5 - 3 sqrt(5)) (-ϕ)^-n + (5 + 3 sqrt(5)) ϕ^n)
+N[h] + 1 =  -(-ϕ)^-2/sqrt(5) (-ϕ)^-n + ϕ^2/sqrt(5) ϕ^n
+N[h] + 1 =  ( ϕ^(n+2) - (-ϕ)^-(n+2) ) / sqrt(5)
+N[h] + 1 = Fib[n + 2]
+N[h] = Fib[h + 2] - 1
+```
+
+Что достаточно забавный результат. 
+
+Но давайте чуть проще это всё докажем, просто по мат-индукции:
+```
+N[0] = 0 = Fib[2] - 1 = 1 - 1 = 0
+N[1] = 1 = Fib[3] - 1 = 2 - 1 = 1
+N[2] = 2 = Fib[4] - 1 = 3 - 1 = 2
+
+N[h + 1] = 1 + N[h] + N[h-1] 
+         = 1 + Fib[h + 2] - 1 + Fib[h + 1] - 1 
+         = Fib[h + 3] - 1
+```
+
+Который нас приводит к следующему выводу, пусть есть AVL-дерево с количеством узлов n и высотой h.
+Но тогда 
+```
+N[h] < n
+h =< log((n + 1) * sqrt(5), ϕ) - 2
+```
+
+Что конечно даёт O(log n) высоту.
+
+Можно кстати написать сейчас соответствующий метод и протестировать его в будущем:
+```racket
+(define phi (/ (inc (sqrt 5)) 2))
+
+(define (aproximate-height n)
+  (- (inexact->exact 
+       (round (log (* (+ 1 n) (sqrt 5)) phi))) 
+     2))
+```
+
+### Вращения
+
+```
+     d             b   
+    / \           / \ 
+   b  [e]  <->  [a]  d
+  / \               / \ 
+[a] [c]           [c] [e]
+
+   a < b < c < d < e
+```
+
+На деревьях поиска можно установить забавную операцию, которая сохраняет структуру дерева поиска.
+И при этом любое дерево ```T_1``` может быть серией вращений преобразовано в дерево ```T_2```.
+
+Это на самом деле легко доказывается, достаточно доказать, что любое дерево раскручивается вращениями в бамбук.
+Давайте запишем серию этих вращений в виде какого-то списка в стиле:
+```
+[left | right] value
+```
+
+Вращая в обратном порядке, а именно при замене: 
+```
+left  vertex -> right (lower value)
+right vertex -> left  (upper value)
+```
+
+Где ```(upper value)``` это следующее значение в множестве больше текущего, а ```(lower value)``` аналогично меньше текущего.
+
+Останется развернуть список и мы получим уже список который бамбук превращает в дерево.
+
+Это всё вытекает из свойств:
+```
+> (equal? (rotate-left (rotate-right tree)) tree)
+true
+> (equal? (entry (rotate-left tree)) (entry (right-branch tree)))
+true
+> (equal? (entry (rotate-right tree)) (entry (left-branch tree)))
+true
+```
+
+Теперь "сериализуем" ```T_1``` и ``T_2```. Развернем по смыслу список ```T_2```, и сконкатенируем их.
+У нас получился список операций который приводит ```T_1 -> бамбук -> T_2```.
+
+Кстати говоря, размер списка это количество вращений необходимое для перевода одного дерева в другое.
+Потому что в самом деле можно всегда развернуть список и получить преобразование ```T_2 -> T_1```.
+
+Естественно подобный способ не единственный и на проверку оказывается достаточно сложно придумать какой-то полиномиальный алгоритм, который бы находил минимальный подобный список. Это открытая проблема в computer science.
+
+> Determining the complexity of computing the rotation distance exactly without parameterization remains unsolved, and the best algorithms currently known for the problem run in exponential time. [wikipedia](https://en.wikipedia.org/wiki/Rotation_distance)
+
+Давайте теперь реализуем вращения, сначала введем ряд вспомогашек, их суть как бы убрать постоянную необходимость пересоздавать идентичное дерево, в котором поменялась только правая или левая ветка.
+
+```racket
+(define (on-left-branch f)
+  (lambda (tree)
+    (make-tree (entry tree)
+               (f (left-branch tree))
+               (right-branch tree))))
+
+(define (on-right-branch f)
+  (lambda (tree)
+    (make-tree (entry tree)
+               (left-branch tree)
+               (f (right-branch tree)))))
+
+(define (replace-right-branch tree branch)
+  ((on-right-branch (lambda (right) branch)) tree))
+
+(define (replace-left-branch tree branch)
+  ((on-left-branch (lambda (left) branch)) tree))
+```
+
+И теперь досаточно коротко можно записать вращение деревьев как:
+```racket
+(define (rotate-left tree)
+  (replace-left-branch 
+    (right-branch tree)
+    ((on-right-branch left-branch) tree)))
+
+(define (rotate-right tree)
+  (replace-right-branch 
+    (left-branch tree)
+    ((on-left-branch right-branch) tree)))
+```
+
+### О балансировке AVL деревьев
+
+Давайте ближе к делу.
+
+Вот у нас было AVL дерево, мы что-то вставили и удалили. 
+Как нам теперь отбалансировать результат?
+
+Ну начнем с того, будем балансировать рекурсивно, поэтому мы ожидаем, что дети наши уже сбалансированы.
+
+Тогда какие у нас могут варианты быть после вставки?
+
+1. Дерево осталось сбалансированным. 
+   Замечательно, ничего делать не надо.
+2. Один из сыновей больше другого на 2.
+
+Так как всё симметрично, давайте без уменьшения общности положим, что правый сын больше.
+
+Теперь у нас снова два варианта:
+1. Правый сын правого больше или равен левого.
+2. Левый сын правого больше.
+
+Первая картинка выглядит вот так:
+```
+1)    (h+3)           2)    (h+3)          
+      /   \                 /   \         
+    (h)   (h+2)           (h)  (h+2)     
+          /  \                 /  \     
+         /    \               /    \    
+     (h+1)    (h+1)         (h)    (h+1)
+```
+
+Что в первом, что во втором случае, правое вращение избавит нас от проблемы.
+```
+1)      (h+3)           2)      (h+2)   
+        /  \                    /  \    
+     (h+2) (h+1)             (h+1) (h+1)
+     /  \                    /  \       
+    /    \                  /    \      
+  (h)   (h+1)             (h)    (h)   
+```
+
+То есть это просто ```rotate-right```.
+
+Немножко другая вторая картинка:
+```
+1)    (h+3)            (h+3)                            
+      /   \            /   \                       (h+2)           
+    (h)  (h+2)       (h)  (h+2)                    /    \          
+         /  \   ==>       /   \       ==>         /      \                        
+        /    \           /     \               (h+1)      (h+1)      
+     (h+1)   (h)      (h|h-1) (h+1)           /    \      /   \    
+     /    \                   /   \          /      \    /     \              
+  (h|h-1) (h|h-1)          (h|h-1) (h)     (h)  (h|h-1) (h|h-1) (h)            
+```
+
+Тут прежде чем вращать всё дерево, надо повращать правого сына.
+И вращать, как по картинке вы заметили, мы будем так, чтобы правая ветка правого сына стала тяжелее.
+
+Чтобы потом мы её развернули как в первом случае правым вращением.
+
+Давайте заведем парочку функциональных примтитивов, для бесточечного программирования.
+И опишем алгос уже.
+```racket
+(define (foldr op start seq)
+  (define (iter result rest)
+    (if (null? rest)
+      result
+      (iter (op result (car rest)) (cdr rest))))
+  (iter start seq))
+
+(define (fork p? f g)
+  (lambda (x)
+    (if (p? x) 
+      (f x) (g x))))
+
+; композиция функций в обратном порядке
+(define (-> . funcs)
+  (foldr (lambda (r f)
+           (lambda (x)
+             (f (r x))))
+         identity
+         funcs))
+```
+
+Нам надо как-то хранить сведения о высоте, для этого мы модифицируем конструктор, добавим пару селекторов и модифицируем существующие селекторы, чтобы они не мешались на случай null-ов.
+
+```racket
+(define (make-tree entry left right)
+  (list entry left right 
+        (inc (max (height left)
+                  (height right)))))
+
+(define (entry tree) (car tree))
+
+(define (left-branch tree) 
+  (if (null? tree) '() (cadr tree)))
+
+(define (right-branch tree)
+  (if (null? tree) '() (caddr tree)))
+
+(define (height tree)
+  (if (null? tree) 0 (cadddr tree)))
+
+(define (balance-factor tree)
+  (- (height (right-branch tree))
+     (height (left-branch tree))))
+```
+
+И теперь мы можем приступать:
+```racket
+;; AVL-tree is considered balanced
+;; if |(height right) - (height left)| < 1
+(define (balanced? tree)
+  (or (= -1 (balance-factor tree))
+      (= 0 (balance-factor tree))
+      (= 1 (balance-factor tree))))
+
+;; apply left function if left is higher
+;; or right function otherwise
+(define (when-higher left-transform right-transform)
+  (lambda (tree)
+    ((if (>= (height (left-branch tree))
+             (height (right-branch tree)))
+       left-transform right-transform) tree)))
+
+(define AVL-balance
+  (fork balanced?
+        identity
+        (when-higher 
+          (-> (on-left-branch 
+                (when-higher 
+                  identity rotate-left))
+              rotate-right)
+          (-> (on-right-branch 
+                (when-higher 
+                  rotate-right identity))
+              rotate-left))))
+```
+
+Давайте еще чуть-чуть про удаление значений из дерева.
+Ну на самом деле это не очень сложно, чтобы удалить вершину в самом верху и сохранить порядок, нам надо удалить минимум в правом поддереве (значения в котором больше удаляемой вершины) и засунуть её наверх. Балансировка аналогично происходит по ходу того как мы спускаемся ниже и ниже.
+
+```racket
+(define (leaf? set)
+  (and (null? (left-branch set))
+       (null? (right-branch set))))
+
+(define (find-min set)
+  (cond 
+    ((null? set) '())
+    ((null? (left-branch set))
+     (entry set))
+    (else (find-min (left-branch set)))))
+
+(define (find-max set)
+  (cond 
+    ((null? set) '())
+    ((null? (right-branch set))
+     (entry set))
+    (else (find-max (right-branch set)))))
+
+(define (remove-head set)
+  (cond ((leaf? set) '())
+        ((null? (left-branch set)) 
+         (right-branch set))
+        ((null? (right-branch set))
+         (left-branch set))
+        (else
+          (let ((m (find-min (right-branch set))))
+            (make-tree m
+                       (left-branch set)
+                       (remove-set m (right-branch set)))))))
+
+(define (remove-set x set)
+  (define alter AVL-balance)
+  (define (remove-x set)
+    (remove-set x set))
+  (define (default)
+    (cond ((null? set) set)
+          ((= x (entry set))
+           (remove-head set))
+          ((< x (entry set))
+           ((on-left-branch remove-x) set))
+          ((> x (entry set))
+           ((on-right-branch remove-x) set))))
+  (alter (default)))
+```
+
+### Как растёт высота AVL дерева на практике
+
+```
+n       min     actual  max
+1       1       1       1
+5       3       3       3
+10      4       4       5
+20      5       5       6
+50      6       7       8
+100     7       8       9
+200     8       9       11
+500     9       11      13
+1000    10      12      14
+2000    11      13      15
+5000    13      14      17
+10000   14      16      19
+20000   15      17      20
+50000   16      19      22
+100000  17      20      24
+200000  18      21      25
+500000  19      23      27
+1000000 20      24      28
+```
+
+за min взято идеально сбалансированное дерево
+за max взята наша оценка высоты
+
+### Полный листинг
+```racket
+#lang sicp
+
+;==== general functional things ====
+
+(define (foldr op start seq)
+  (define (iter result rest)
+    (if (null? rest)
+      result
+      (iter (op result (car rest)) (cdr rest))))
+  (iter start seq))
+
+(define (fork p? f g)
+  (lambda (x)
+    (if (p? x) 
+      (f x) (g x))))
+
+(define (-> . funcs)
+  (foldr (lambda (r f)
+           (lambda (x)
+             (f (r x))))
+         identity
+         funcs))
+
+;==== selectors & constructors ====
+(define (make-tree entry left right)
+  (list entry left right 
+        (inc (max (height left)
+                  (height right)))))
+
+(define (entry tree) (car tree))
+
+(define (left-branch tree) 
+  (if (null? tree) '() (cadr tree)))
+
+(define (right-branch tree)
+  (if (null? tree) '() (caddr tree)))
+
+(define (height tree)
+  (if (null? tree) 0 (cadddr tree)))
+
+(define (balance-factor tree)
+  (- (height (right-branch tree))
+     (height (left-branch tree))))
+
+;==== various tree-operations shorthands ====
+
+(define (on-left-branch f)
+  (lambda (tree)
+    (make-tree (entry tree)
+               (f (left-branch tree))
+               (right-branch tree))))
+
+(define (on-right-branch f)
+  (lambda (tree)
+    (make-tree (entry tree)
+               (left-branch tree)
+               (f (right-branch tree)))))
+
+(define (replace-right-branch tree branch)
+  ((on-right-branch (lambda (right) branch)) tree))
+
+(define (replace-left-branch tree branch)
+  ((on-left-branch (lambda (left) branch)) tree))
+
+;==== balancing ====
+
+(define (rotate-left tree)
+  (replace-left-branch 
+    (right-branch tree)
+    ((on-right-branch left-branch) tree)))
+
+(define (rotate-right tree)
+  (replace-right-branch 
+    (left-branch tree)
+    ((on-left-branch right-branch) tree)))
+
+;; AVL-tree is considered balanced
+;; if |(height right) - (height left)| < 1
+(define (balanced? tree)
+  (or (= -1 (balance-factor tree))
+      (= 0 (balance-factor tree))
+      (= 1 (balance-factor tree))))
+
+;; apply left function if left is higher
+;; or right function otherwise
+(define (when-higher left-transform right-transform)
+  (lambda (tree)
+    ((if (>= (height (left-branch tree))
+             (height (right-branch tree)))
+       left-transform right-transform) tree)))
+
+
+(define AVL-balance
+  (fork balanced?
+        identity
+        (when-higher 
+          (-> (on-left-branch 
+                (when-higher 
+                  identity rotate-left))
+              rotate-right)
+          (-> (on-right-branch 
+                (when-higher 
+                  rotate-right identity))
+              rotate-left))))
+
+;==== Set operations ====
+
+(define (element-of-set? x set)
+  (cond ((null? set) false)
+        ((= x (entry set)) true)
+        ((< x (entry set))
+         (element-of-set? 
+          x 
+          (left-branch set)))
+        ((> x (entry set))
+         (element-of-set? 
+          x 
+          (right-branch set)))))
+
+(define (adjoin-set x set)
+  (define alter AVL-balance)
+  (define (adjoin-x set) (adjoin-set x set))
+  (define (default)
+    (cond ((null? set) (make-tree x '() '()))
+          ((= x (entry set)) set)
+          ((< x (entry set))
+           ((on-left-branch adjoin-x) set))
+          ((> x (entry set))
+           ((on-right-branch adjoin-x) set))))
+  (alter (default)))
+
+(define (leaf? set)
+  (and (null? (left-branch set))
+       (null? (right-branch set))))
+
+(define (find-min set)
+  (cond 
+    ((null? set) '())
+    ((null? (left-branch set))
+     (entry set))
+    (else (find-min (left-branch set)))))
+
+(define (find-max set)
+  (cond 
+    ((null? set) '())
+    ((null? (right-branch set))
+     (entry set))
+    (else (find-max (right-branch set)))))
+
+(define (remove-head set)
+  (cond ((leaf? set) '())
+        ((null? (left-branch set)) 
+         (right-branch set))
+        ((null? (right-branch set))
+         (left-branch set))
+        (else
+          (let ((m (find-min (right-branch set))))
+            (make-tree m
+                       (left-branch set)
+                       (remove-set m (right-branch set)))))))
+
+(define (remove-set x set)
+  (define alter AVL-balance)
+  (define (remove-x set)
+    (remove-set x set))
+  (define (default)
+    (cond ((null? set) set)
+          ((= x (entry set))
+           (remove-head set))
+          ((< x (entry set))
+           ((on-left-branch remove-x) set))
+          ((> x (entry set))
+           ((on-right-branch remove-x) set))))
+  (alter (default)))
+
+;==== debuging ====
+
+(define (display-tree tree)
+  (define (pad n)
+    (make-string n (string-ref " " 0)))
+  (define (display-padded n str)
+    (display (string-append (pad n)
+                            str
+                            "\n")))
+  (define (display-tree-padded level tree)
+    (if (null? tree)
+      (display-padded level "x")
+      (begin 
+        (display-tree-padded 
+          (+ level 4) 
+          (left-branch tree))
+        (display-padded 
+          level 
+          (number->string (entry tree)))
+        (display-tree-padded 
+          (+ level 4) 
+          (right-branch tree)))))
+  (display-tree-padded 0 tree))
+
+;==== examining height ====               
+(#%require (only racket require
+                        prefix-in
+                        only-in))
+(require (prefix-in rkt: 
+                    (only-in racket
+                             shuffle
+                             in-inclusive-range
+                             sequence->list)))
+(require (prefix-in rkt: 
+                    (only-in racket/mpair
+                             mlist->list
+                             list->mlist)))
+
+(define (convert fn)
+  (-> rkt:mlist->list
+      fn
+      rkt:list->mlist))
+
+(define shuffle (convert rkt:shuffle)) 
+
+(define (nums-seq n)
+  (rkt:in-inclusive-range 1 n))
+
+(define nums
+  (-> nums-seq 
+      rkt:sequence->list
+      rkt:list->mlist))
+
+(define (adjoin-values tree vals)
+  (foldr (lambda (tree x)
+           (adjoin-set x tree))
+         tree
+         vals))
+
+(define (remove-values tree vals)
+  (foldr (lambda (tree x)
+           (remove-set x tree))
+         tree
+         vals))
+
+(define phi (/ (inc (sqrt 5)) 2))
+
+(define (max-height n)
+  (- (inexact->exact 
+       (round (log (* (+ 1 n) (sqrt 5)) phi))) 
+     2))
+
+(define (actual-height n)
+  (height (adjoin-values '() (shuffle (nums n)))))
+
+(define (min-height n)
+  (inexact->exact (ceiling (log (inc n) 2))))
+
+(define (test n)
+  (string-append (number->string n) "\t"
+                 (number->string (min-height n)) "\t"
+                 (number->string (actual-height n)) "\t"
+                 (number->string (max-height n)) "\n"))
+
+(display (string-append "n\tmin\tactual\tmax\n"
+                        (test 1)
+                        (test 5)
+                        (test 10)
+                        (test 20)
+                        (test 50)
+                        (test 100)
+                        (test 200)
+                        (test 500)
+                        (test 1000)
+                        (test 2000)
+                        (test 5000)
+                        (test 10000)
+                        (test 20000)
+                        (test 50000)
+                        (test 100000)
+                        (test 200000)
+                        (test 500000)
+                        (test 1000000)))
+```
+
 ## 2.63
+
