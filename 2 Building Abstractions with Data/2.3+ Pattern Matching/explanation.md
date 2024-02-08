@@ -3,7 +3,7 @@
 Этот контент не из книги, не ищите его в ней, вы его не найдёте.
 
 Это контент вот этой лекции, которая тоже часть курса:
-![](https://www.youtube.com/watch?v=_fXQ1SwKjDg&pp=ygURcGF0dGVybiBtYXRjaGluZyA%3D)
+[![](https://img.youtube.com/vi/_fXQ1SwKjDg/0.jpg)](https://www.youtube.com/watch?v=_fXQ1SwKjDg)
 
 В общем чем мы тут займёмся? Сначала сходите посмотрите лекцию.
 И мы немного поправим код на доске, чтобы он работал с современным scheme, короче сами напишем всё.
