@@ -1,0 +1,90 @@
+#lang sicp
+
+(define deriv-rules
+  '(
+    ((dd (?c c) (? v)) 0)
+    ((dd (?v v) (? v)) 1)
+    ((dd (?v u) (? u)) 0)
+
+    ((dd (+ (? a) (? b)) (? v)) 
+     (+ (dd (: a) (: v))
+        (dd (: b) (: v))))
+
+    ((dd (- (? a) (? b)) (? v))
+     (- (dd (: a) (: v))
+        (dd (: b) (: v))))
+
+    ((dd (* (? a) (? b)) (? v))
+     (+ (* (dd (: a) (: v))
+           (: b))
+        (* (: a)
+           (dd (: b) (: v)))))))
+
+;(define dsimp
+;  (simplifier deriv-rules))
+
+(define (fail dict)
+  false)
+
+(define (failed? dict) 
+  (not dict))
+
+(define (arbitrary-constant? pat)
+  (eq? '?c (car pat)))
+
+(define (arbitrary-variable? pat)
+  (eq? '?v (car pat)))
+
+(define (arbitrary-expression? pat)
+  (eq? '? (car pat)))
+
+(define (variable-name pat)
+  (cadr pat))
+
+(define (atom? x)
+  (not (pair? x)))
+
+(define (match pat exp dict)
+  (cond ((failed? dict) dict)
+        ((atom? pat)
+         (match-atomic pat exp dict))
+        ((arbitrary-constant? pat)
+         (match-constant pat exp dict))
+        ((arbitrary-variable? pat)
+         (match-variable pat exp dict))
+        ((arbitrary-expression? pat)
+         (match-expression pat exp dict))
+        ((atom? exp)
+         (fail dict))
+        (else 
+         (match (car pat)
+                (car exp)
+                (match (cdr pat)
+                       (cdr dict))))))
+
+(define (match-atomic pat exp dict)
+  (if (eq? pat exp)
+    dict
+    (fail dict)))
+
+(define (extend-dict pat value dict) 
+  (let* ((name (variable-name pat))
+         (p (assq name dict)))
+    (cond ((not p) (car (list name value) dict))
+          ((equal? (cadr p) value) dict)
+          (else (fail dict)))))
+
+(define (match-pred pred?)
+  (lambda (pat exp dict)
+    (if (pred? exp)
+      (extend-dict pat exp dict)
+      (fail dict))))
+
+(define constant? number?)
+(define variable? symbol?)
+(define expression? (lambda (x) true))
+
+(define match-constant (match-pred constant?))
+(define match-variable (match-pred variable?))
+(define match-expression (match-pred expression?))
+
