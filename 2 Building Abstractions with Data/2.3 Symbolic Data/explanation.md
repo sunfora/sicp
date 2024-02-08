@@ -1474,7 +1474,7 @@ n       min     actual  max
 
 ## 2.63
 
-```
+```racket
 #lang sicp
 
 (define (entry tree) (cadr tree))
