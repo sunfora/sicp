@@ -9,7 +9,7 @@
 * [разбор 2.1](./2 Building Abstractions with Data/2.1 Introduction to Data Abstraction/explanation.md)
 * [разбор 2.2](./2 Building Abstractions with Data/2.2 Hierarchical Data and the Closure Property/explanation.md)
 * [разбор 2.3](./2 Building Abstractions with Data/2.3 Symbolic Data/explanation.md)
-* [разбор 2.3](./2 Building Abstractions with Data/2.3+ Pattern Matching/explanation.md)
+* [разбор 2.3+ (лекция 4A)](./2 Building Abstractions with Data/2.3+ Pattern Matching/explanation.md)
 
 # Extra
 
