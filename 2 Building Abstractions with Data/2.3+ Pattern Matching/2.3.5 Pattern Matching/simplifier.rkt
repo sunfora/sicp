@@ -1,10 +1,16 @@
 #lang sicp
 
+; ========= dsimp+ ==============
+
+(define (dsimp+ expr)
+  (canon (sort-expr (canon (dsimp expr)))))
+
+; ========= dsimp =============== 
+
 (define deriv-rules
-  '(
-    ((dd (?c c) (? v)) 0)
+  '(((dd (?c c) (? v)) 0)
     ((dd (?v v) (? v)) 1)
-    ((dd (?v u) (? u)) 0)
+    ((dd (?v v) (? u)) 0)
 
     ((dd (+ (? a) (? b)) (? v)) 
      (+ (dd (: a) (: v))
@@ -20,14 +26,194 @@
         (* (: a)
            (dd (: b) (: v)))))))
 
-;(define dsimp
-;  (simplifier deriv-rules))
+(define dsimp
+  (simplifier deriv-rules))
+
+; ========= canon =============== 
+
+(define canonical-form-rules
+  '(
+    ; compute constants
+    (((? op) (?c x) (?c y))
+     (:e (: (op x y))))
+    ((+ (?c x) (+ (?c y) (? z)))
+     (+ (:e (: (+ x y))) (: z)))
+    ((* (?c x) (* (?c y) (? z)))
+     (* (:e (: (* x y))) (: z)))
+
+    ; simplify
+    ((* 1 (? x)) (: x))
+    ((* (? x) 1) (: x))
+    ((+ 0 (? x)) (: x))
+    ((+ (? x) 0) (: x))
+    ((* 0 (? x)) 0)
+    ((* (? x) 0) 0)
+
+    ; expand sums
+    ((* (? x) (+ (? y) (? z)))
+     (+ (* (: x) (: y))
+        (* (: x) (: z))))
+    ((* (+ (? x) (? y)) (? z))
+     (+ (* (: x) (: z))
+        (* (: y) (: z))))
+    
+    ; move out constants
+    ((+ (? x) (?c c))
+     (+ (: c) (: x)))
+    ((* (? x) (?c c))
+     (* (: c) (: x)))
+    ((+ (?v v) (+ (?c c) (? x)))
+     (+ (: c) (+ (: v) (: x))))
+    ((* (?v v) (* (?c c) (? x)))
+     (* (: c) (* (: v) (: x))))
+
+    ; unique association
+    ((+ (+ (? x) (? y)) (? z))
+     (+ (: x) (+ (: y) (: z))))
+    ((* (* (? x) (? y)) (? z))
+     (* (: x) (* (: y) (: z))))
+
+    ; collect same terms 
+    ((+ (? x) (? x))
+     (* 2 (: x)))
+    ((+ (? x) (+ (? x) (? y)))
+     (+ (* 2 (: x)) (: y)))
+
+    ((+ (* (?c a) (? x)) (? x))
+     (* (:e (: (+ 1 a))) (: x)))
+    ((+ (* (?c a) (? x)) (+ (? x) (? y)))
+     (+ (* (:e (: (+ 1 a))) (: x)) (: y)))
+
+    ((+ (? x) (* (?c a) (? x)))
+     (* (:e (: (+ 1 a))) (: x)))
+    ((+ (? x) (+ (* (?c a) (? x)) (? y)))
+     (+ (* (:e (: (+ 1 a))) (: x)) (: y)))
+
+    ((+ (* (?c a) (? x))
+        (* (?c b) (? x)))
+     (* (:e (: (+ a b)))
+        (: x)))
+    ((+ (* (?c a) (? x))
+        (+ (* (?c b) (? x)) (? y)))
+     (+ (* (:e (: (+ a b))) (: x))
+        (: y)))
+    ))
+
+(define canon 
+  (simplifier canonical-form-rules))
+
+; ======== sort-expr ============
+
+(define (expr->list op expr)
+  (define (op? expr)
+    (and (pair? expr)
+         (eq? op (car expr))))
+  (cond ((null? expr) expr)
+        ((op? (caddr expr)) 
+         (cons (cadr expr)
+               (expr->list op (caddr expr))))
+        (else (cdr expr))))
+
+(define (list->expr op lst)
+  (if (null? (cddr lst))
+    (cons op lst)
+    (list op 
+          (car lst) 
+          (list->expr op (cdr lst)))))
+
+(#%require (only racket
+                 symbol<?
+                 sort))
+
+(#%require (only racket/mpair
+                 mlist->list 
+                 list->mlist))
+
+(define (sort-symbols lst)
+  (list->mlist (sort (mlist->list lst) symbol<?)))
+
+
+(define (sort-product product)
+  (let* ((lst (expr->list '* product))                  
+         (sorted (if (number? (car lst))
+                   (cons (car lst)
+                         (sort-symbols (cdr lst)))
+                   (sort-symbols lst)))
+         (expr (list->expr '* sorted)))
+    expr))
+
+(define (sort-products lst)
+  (define (key product)
+    (let ((result (expr->list '* product)))
+      (if (number? (car result))
+        (cdr result)
+        result)))
+  (list->mlist (sort (mlist->list 
+                       (map sort-product lst))
+                     lex<? 
+                     #:key key)))
+
+(define (lex<? product-1 product-2)
+  (define (eq-size<? product-1 product-2)
+    (and (not (null? product-1))
+         (let ((x (car product-1))
+               (y (car product-2))
+               (xr (cdr product-1))
+               (yr (cdr product-2)))
+           (or (and (eq? x y)
+                    (eq-size<? xr yr))
+               (symbol<? x y)))))
+  (cond ((< (length product-1) (length product-2))
+         true)
+        ((> (length product-1) (length product-2))
+         false)
+        (else (eq-size<? product-1 product-2))))
+
+(define (sort-sum sum)
+  (let* ((subs (expr->list '+ sum))
+         (products (if (number? (car subs))
+                     (cons (car subs)
+                           (sort-products (cdr subs)))
+                     (sort-products subs)))
+         (result (list->expr '+ products)))
+    result))
+
+(define (sort-expr expr)
+  (cond ((atom? expr) expr)
+        ((eq? '+ (car expr))
+         (sort-sum expr))
+        ((eq? '* (car expr))
+         (sort-product expr))
+        (else 
+          (error "unknown expr"))))
+
+
+; =========== dict ==============
 
 (define (fail dict)
   false)
 
 (define (failed? dict) 
   (not dict))
+
+(define (extend-dict pat value dict) 
+  (let* ((name (variable-name pat))
+         (p (assq name dict)))
+    (cond ((not p) (cons (list name value) dict))
+          ((equal? (cadr p) value) dict)
+          (else (fail dict)))))
+
+(define (lookup var dict)
+  (if (failed? dict)
+    (error "trying to evaluate failed dict"))
+  (let ((value (assq var dict)))
+    (if value
+      (cadr value)
+      var)))
+
+(define empty-dictionary '())
+
+; ========== matcher ============
 
 (define (arbitrary-constant? pat)
   (eq? '?c (car pat)))
@@ -68,13 +254,6 @@
     dict
     (fail dict)))
 
-(define (extend-dict pat value dict) 
-  (let* ((name (variable-name pat))
-         (p (assq name dict)))
-    (cond ((not p) (cons (list name value) dict))
-          ((equal? (cadr p) value) dict)
-          (else (fail dict)))))
-
 (define (match-pred pred?)
   (lambda (pat exp dict)
     (if (pred? exp)
@@ -82,12 +261,16 @@
       (fail dict))))
 
 (define constant? number?)
-; (define variable? symbol?)
 (define expression? (lambda (x) true))
+(define (variable? expr)
+  (and (symbol? expr)
+       (parsed-symbol? take-variable expr)))
 
 (define match-constant (match-pred constant?))
-
 (define match-expression (match-pred expression?))
+(define match-variable (match-pred variable?))
+
+; ====== parse variable =========
 
 (define (delimiter? char)
   (if (member char '(#\- #\_)) true false))
@@ -153,13 +336,7 @@
 
 (define (parsed-symbol? parser symbol)
   (parsed-string? parser (symbol->string symbol)))
-
-(define (variable? expr)
-  (and (symbol? expr)
-       (parsed-symbol? take-variable expr)))
-
-(define match-variable (match-pred variable?))
-
+; ======= instantiator ==========
 (define (walk f tree)
   (define (walk-f tree) (walk f tree))
   (cond ((null? tree) tree)
@@ -218,16 +395,7 @@
     (error "expected one argument for skeleton" skeleton))
   (cadr skeleton))
 
-(define (lookup var dict)
-  (if (failed? dict)
-    (error "trying to evaluate failed dict"))
-  (let ((value (assq var dict)))
-    (if value
-      (cadr value)
-      var)))
-
 (define (evaluate expr)
-  (display expr) (newline)
   (eval expr
         (interaction-environment)))
 
@@ -236,8 +404,50 @@
     (lookup var dict))
   (car (tree-map look (list expr))))
 
-(define or-set 
-  (instantiate '(:e (lambda (x)
-                      (or (:@ (:e (map (lambda (n) (list 'equal? n 'x))
-                                     (list (:@ (: x)))))))))
-             '((x ("what" "the" "hell" 1)))))
+; ======== simplifier ===========
+
+(define (rule-pattern rule)
+  (car rule))
+
+(define (rule-skeleton rule)
+  (cadr rule))
+
+(define (simplifier the-rules)
+  (define (simplify-expr expr)
+    (walk try-rules expr))
+  (define (try-rules expr)
+    (define (scan rules)
+      (if (null? rules)
+        expr
+        (let* ((rule (car rules))
+               (pattern (rule-pattern rule))
+               (skeleton (rule-skeleton rule))
+               (dict (match pattern expr empty-dictionary)))
+          (if (failed? dict)
+            (scan (cdr rules))
+            (simplify-expr (instantiate skeleton dict))))))
+    (scan the-rules))
+  simplify-expr)
+; ========= little fun ==========
+
+(define factorial-rules
+  '(((* (?c a) (?c b))
+     (:e (* (: a) (: b))))
+    
+    ((f 0) 1)
+    ((f (?c n)) (* (: n) (f (:e (dec (: n))))))))
+
+(define fact-simp
+  (simplifier factorial-rules))
+
+(define fib-rules 
+  '(((+ (?c a) (?c b))
+     (:e (+ (: a) (: b))))
+    
+    ((f 0) 0)
+    ((f 1) 1)
+    ((f (?c n)) (+ (f (:e (- (: n) 1)))
+                   (f (:e (- (: n) 2)))))))
+
+(define fib-simp
+  (simplifier fib-rules))

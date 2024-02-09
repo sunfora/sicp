@@ -18,7 +18,7 @@
   '(
     ((dd (?c c) (? v)) 0)
     ((dd (?v v) (? v)) 1)
-    ((dd (?v u) (? u)) 0)
+    ((dd (?v v) (? u)) 0)
 
     ((dd (+ (? a) (? b)) (? v)) 
      (+ (dd (: a) (: v))
@@ -520,4 +520,314 @@ x = 5, y = 6
 Ну на этом мы покончим с instantiation и передвинемся к чему-то более содержательному.
 Но перед этим я хочу заметить, что всякие макросы вроде того, что в лиспе есть сделаны примерно так же по сути.
 
+## Simplifier
 
+В общем "упроститель" будет построен по тому же примеру что и всё остальное. 
+Мы сначала упростим все составные части выражения, а потом попробуем упростить основное выражение, попытавшись подобрать правило для него.
+
+```racket
+(define empty-dictionary '())
+
+(define (rule-pattern rule)
+  (car rule))
+
+(define (rule-skeleton rule)
+  (cadr rule))
+
+(define (simplifier the-rules)
+  (define (simplify-expr expr)
+    (walk try-rules expr))
+  (define (try-rules expr)
+    (define (scan rules)
+      (if (null? rules)
+        expr
+        (let* ((rule (car rules))
+               (pattern (rule-pattern rule))
+               (skeleton (rule-skeleton rule))
+               (dict (match pattern expr empty-dictionary)))
+          (if (failed? dict)
+            (scan (cdr rules))
+            (simplify-expr (instantiate skeleton dict))))))
+    (scan the-rules))
+  simplify-expr)
+```
+
+Ну, как я и писал: делаем walk, и упрощаем все под-выражения, потом упрощаем основную форму. Она может привести к тому, что мы снова попрёмся вниз. И так пока оно не устаканится.
+
+```racket
+> (dsimp '(dd (+ x y) y))
+(+ 0 1)
+> (dsimp '(dd (* z (x y)) y))
+(+ (* 0 (+ x y)) (* z (+ 0 1)))
+> (dsimp '(dd (/ z (x y)) y))
+(dd (/ z (+ x y)) y)
+```
+
+Ну короче действительно работает. 
+Мы можем добавить ряд простых правил, которые упростят наши выражения. 
+
+Ну например всякие вычисления констант и т.д.
+
+Единственный минус подобной системы, что достаточно простые комбинации правил уже приводят к зацикливанию, ну например если мы добавим какое-то правило коммутативности ```((+ (? x) (? y)) (+ (: y) (: x)))```.
+
+Ну понятно: мы пытаемся упростить, а оно продуцирует комбинацию такого же размера и такой же сложности. 
+
+Более правильный способ такое фиксить, например сначала всё привести к какому-то каноническому виду, потом всё посортировать, собрать общие термы и т.д.
+
+```racket
+(define canonical-form-rules
+  '(
+    ; compute constants
+    (((? op) (?c x) (?c y))
+     (:e (: (op x y))))
+    ((+ (?c x) (+ (?c y) (? z)))
+     (+ (:e (: (+ x y))) (: z)))
+    ((* (?c x) (* (?c y) (? z)))
+     (* (:e (: (* x y))) (: z)))
+
+    ; simplify
+    ((* 1 (? x)) (: x))
+    ((* (? x) 1) (: x))
+    ((+ 0 (? x)) (: x))
+    ((+ (? x) 0) (: x))
+    ((* 0 (? x)) 0)
+    ((* (? x) 0) 0)
+
+    ; expand sums
+    ((* (? x) (+ (? y) (? z)))
+     (+ (* (: x) (: y))
+        (* (: x) (: z))))
+    ((* (+ (? x) (? y)) (? z))
+     (+ (* (: x) (: z))
+        (* (: y) (: z))))
+    
+    ; move out constants
+    ((+ (? x) (?c c))
+     (+ (: c) (: x)))
+    ((* (? x) (?c c))
+     (* (: c) (: x)))
+    ((+ (?v v) (+ (?c c) (? x)))
+     (+ (: c) (+ (: v) (: x))))
+    ((* (?v v) (* (?c c) (? x)))
+     (* (: c) (* (: v) (: x))))
+
+    ; unique association
+    ((+ (+ (? x) (? y)) (? z))
+     (+ (: x) (+ (: y) (: z))))
+    ((* (* (? x) (? y)) (? z))
+     (* (: x) (* (: y) (: z))))
+
+    ; collect same terms 
+    ((+ (? x) (? x))
+     (* 2 (: x)))
+    ((+ (? x) (+ (? x) (? y)))
+     (+ (* 2 (: x)) (: y)))
+
+    ((+ (* (?c a) (? x)) (? x))
+     (* (:e (: (+ 1 a))) (: x)))
+    ((+ (* (?c a) (? x)) (+ (? x) (? y)))
+     (+ (* (:e (: (+ 1 a))) (: x)) (: y)))
+
+    ((+ (? x) (* (?c a) (? x)))
+     (* (:e (: (+ 1 a))) (: x)))
+    ((+ (? x) (+ (* (?c a) (? x)) (? y)))
+     (+ (* (:e (: (+ 1 a))) (: x)) (: y)))
+
+    ((+ (* (?c a) (? x))
+        (* (?c b) (? x)))
+     (* (:e (: (+ a b)))
+        (: x)))
+    ((+ (* (?c a) (? x))
+        (+ (* (?c b) (? x)) (? y)))
+     (+ (* (:e (: (+ a b))) (: x))
+        (: y)))
+    ))
+```
+
+Если я ничего не напортачил, то приведение к каноническому виду более менее можно задать вот этими правилами. Сейчас быстро пробегусь, что тут вообще происходит:
+  
+  1. Вычисляем всевозможные константы
+  2. Упрощаем выражения, если есть лёгкая возможность
+  3. Раскрываем все произведения сумм в суммы произведений
+  4. Вытаскиваем константы вперед выражений
+  5. Расставляем скобки слева на право
+  6. Собираем общие члены вместе
+
+Но этого не достаточно, потому что у нас например может быть такая гадость:
+```
+(+ (* 2 (* x y)) (* 3 (* y x)))
+```
+
+Ну и вообще произведения не расставлены в каком-либо порядке, например вот такое тоже нашими правилами не сожмётся:
+```
+(+ x (+ (* x y) x))
+```
+
+Давайте просто посортируем лексикографически произведения и лексикографически суммы:
+```racket
+(define (expr->list op expr)
+  (define (op? expr)
+    (and (pair? expr)
+         (eq? op (car expr))))
+  (cond ((null? expr) expr)
+        ((op? (caddr expr)) 
+         (cons (cadr expr)
+               (expr->list op (caddr expr))))
+        (else (cdr expr))))
+
+(define (list->expr op lst)
+  (if (null? (cddr lst))
+    (cons op lst)
+    (list op 
+          (car lst) 
+          (list->expr op (cdr lst)))))
+
+(#%require (only racket
+                 symbol<?
+                 sort))
+
+(#%require (only racket/mpair
+                 mlist->list 
+                 list->mlist))
+
+(define (sort-symbols lst)
+  (list->mlist (sort (mlist->list lst) symbol<?)))
+
+
+(define (sort-product product)
+  (let* ((lst (expr->list '* product))                  
+         (sorted (if (number? (car lst))
+                   (cons (car lst)
+                         (sort-symbols (cdr lst)))
+                   (sort-symbols lst)))
+         (expr (list->expr '* sorted)))
+    expr))
+
+(define (sort-products lst)
+  (define (key product)
+    (let ((result (expr->list '* product)))
+      (if (number? (car result))
+        (cdr result)
+        result)))
+  (list->mlist (sort (mlist->list 
+                       (map sort-product lst))
+                     lex<? 
+                     #:key key)))
+
+(define (lex<? product-1 product-2)
+  (define (eq-size<? product-1 product-2)
+    (and (not (null? product-1))
+         (let ((x (car product-1))
+               (y (car product-2))
+               (xr (cdr product-1))
+               (yr (cdr product-2)))
+           (or (and (eq? x y)
+                    (eq-size<? xr yr))
+               (symbol<? x y)))))
+  (cond ((< (length product-1) (length product-2))
+         true)
+        ((> (length product-1) (length product-2))
+         false)
+        (else (eq-size<? product-1 product-2))))
+
+(define (sort-sum sum)
+  (let* ((subs (expr->list '+ sum))
+         (products (if (number? (car subs))
+                     (cons (car subs)
+                           (sort-products (cdr subs)))
+                     (sort-products subs)))
+         (result (list->expr '+ products)))
+    result))
+
+(define (sort-expr expr)
+  (cond ((atom? expr) expr)
+        ((eq? '+ (car expr))
+         (sort-sum expr))
+        ((eq? '* (car expr))
+         (sort-product expr))
+        (else 
+          (error "unknown expr"))))
+```
+
+Теперь например можно делать следующее:
+```
+> (sort-expr 1)
+1
+> (sort-expr '(* y x))
+(* x y)
+> (sort-expr '(+ (* y x) (* x (* z y))))
+(+ (* x y) (* x (* y z)))
+```
+
+И теперь если мы прогоним отсортированную каноническую форму еще раз через каноническую форму, то получим уже полностью собранные термы:
+```
+> (canon (sort-expr (canon '(+ (* x (* y 2)) (* y (* x 5))))))
+(* 7 (* x y))
+```
+
+Ну и собственно на этом наш упроститель выражений готов. Давайте всё это великолепие обернем:
+```racket 
+(define (dsimp+ expr)
+  (canon (sort-expr (canon (dsimp expr)))))
+```
+
+```
+> (dsimp+ '(dd (+ (* x (* y x))
+         (* 3 (* y (* x x))))
+       x))
+(* 8 (* x y))
+```
+
+Работает эта красота следующим образом (показываю каждое преобразование):
+```
+dsimp
+(+ (+ (* 1 (* y x)) (* x (+ (* 0 x) (* y 1))))
+ (+ (* 0 (* y (* x x))) (* 3 (+ (* 0 (* x x))
+(* y (+ (* 1 x) (* x 1)))))))
+
+canon
+(+ (* y x) (+ (* x y) (* 6 (* y x))))
+
+sort-expr
+(+ (* x y) (+ (* x y) (* 6 (* x y))))
+
+canon
+(* 8 (* x y))
+```
+
+## Немножко фана на последок
+
+```racket
+(define factorial-rules
+  '(((* (?c a) (?c b))
+     (:e (* (: a) (: b))))
+    
+    ((f 0) 1)
+    ((f (?c n)) (* (: n) (f (:e (dec (: n))))))))
+
+(define fact-simp
+  (simplifier factorial-rules))
+
+(define fib-rules 
+  '(((+ (?c a) (?c b))
+     (:e (+ (: a) (: b))))
+    
+    ((f 0) 0)
+    ((f 1) 1)
+    ((f (?c n)) (+ (f (:e (- (: n) 1)))
+                   (f (:e (- (: n) 2)))))))
+
+(define fib-simp
+  (simplifier fib-rules))
+```
+
+Мы вполне себе можем считать всякие рекурсивные функции:
+```
+> (fact-simp '(f 5))
+120
+
+> (fib-simp '((f 0) (f 1) (f 2) (f 3) (f 4) (f 5) (f 6) (f 7)))
+(0 1 1 2 3 5 8 13)
+```
+
+Ну и на самом деле много чего. Так-то не обязательно было писать на scheme sort-expr, потому что можно его было засунуть в этот язык, другое дело что он не настолько уж выразителен, чтобы это было оправдано.
