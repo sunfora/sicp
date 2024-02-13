@@ -226,3 +226,117 @@ done
 
 ## 2.73
 
+1. Произошло следующее: мы теперь делаем диспатч по типу операции, заместо того, чтобы руками прописывать правила для каждой конкретной операции. 
+   
+   Мы не можем не проверить expr на number? variable? или compound?, по той причине что на вход нам поступает не-типизированное выражение. А вот проблем с разными операциями не возникает, потому что в качестве типа операции мы можем взять просто оператор каждой операции (при условии конечно, что они имеют синтаксис ```(op args)```).
+
+2. Ну сначала проверим что всё работает как заявлено:
+   ```
+   > (deriv 1 'x)
+   0
+   > (deriv 'x 'x)
+   1
+   > (deriv '(+ x y) 'x)
+   ; get: method deriv for type + does not exist [,bt for context]
+   ```
+   
+   Теперь добавим наши пакеты:
+   ```racket
+   (define (make op)
+     (lambda (operands)
+       (cons op operands)))
+
+   (define (install-sum-package)
+     (define (deriv-sum ops var) 
+       (define (deriv- x) (deriv x var))
+       ((make '+) 
+        (map deriv- ops)))
+
+     (put 'deriv '+ deriv-sum) 
+     'done)
+
+   (define (install-product-package)
+     (define (clauses args var)
+       (if (null? args)
+         '()
+         (let ((head (car args))
+               (rest (cdr args)))
+           (cons (cons (deriv head var) rest)
+                 (map (lambda (x)
+                        (cons head x))
+                      (clauses rest var))))))
+
+     (define (deriv-product ops var)
+       ((make '+) 
+        (map (make '*)                             
+             (clauses ops var))))  
+
+     (put 'deriv '* deriv-product) 
+     'done)
+
+   (install-product-package)
+   (install-sum-package)
+   ```
+   
+   И теперь уже всё получается:
+   ```
+   > (deriv '(+ x y) 'y)
+   (+ 0 1)
+   > (deriv '(* x x) 'x)
+   (+ (* 1 x) (* x 1))
+   ```
+3. Давайте для разнообразия добавим что-нибудь новенькое, например -, sin и cos.
+   
+   ```racket 
+   (define (install-sub-package)
+     (define (deriv-sub ops var) 
+       (define (deriv- x) (deriv x var))
+       ((make '-) 
+        (map deriv- ops)))
+
+     (put 'deriv '- deriv-sub) 
+     'done)
+
+   (define (install-trig-package)
+     (define (deriv-sin ops var)
+       (if (not (= 1 (length ops)))
+         (error 'deriv
+                "sin expected 1 argument ~a"
+                ops))
+       ((make '*) 
+        (list ((make 'cos) ops)
+              (deriv (car ops) var))))
+
+     (define (deriv-cos ops var)
+       (if (not (= 1 (length ops)))
+         (error 'deriv
+                "cos expected 1 argument ~a"
+                ops))
+       ((make '*) 
+        (list ((make '-) 
+               (list ((make 'sin) ops)))
+              (deriv (car ops) var))))
+
+     (put 'deriv 'sin deriv-sin)
+     (put 'deriv 'cos deriv-cos)
+     'done)
+   ```
+
+   И оно действительно (после установки пакетов) теперь работает:
+   ```
+   > (deriv '(sin (* x x)) 'x)
+   (* (cos (* x x)) (+ (* 1 x) (* x 1)))
+   "2.4.3 Data-Directed Programming and
+   > (deriv '(cos (* x x)) 'x)
+   (* (- (sin (* x x))) (+ (* 1 x) (* x 1)))
+   ```
+4. Так как мы поменяли оператор и 'deriv, придётся в каждом пакете сделать то же самое в соответствующих вызовах put: 
+  ```
+  (put 'deriv '+ deriv-sum) -> (put '+ 'deriv deriv-sum)
+  (put 'deriv '* deriv-product) -> (put '* 'deriv deriv-product)      
+  (put 'deriv '- deriv-sub) -> (put '- 'deriv deriv-sub) 
+  (put 'deriv 'sin deriv-sin) -> (put 'sin 'deriv deriv-sin)
+  (put 'deriv 'cos deriv-cos) -> (put 'cos 'deriv deriv-cos)
+  ```
+
+  Что на самом деле сравнительно небольшое изменение.

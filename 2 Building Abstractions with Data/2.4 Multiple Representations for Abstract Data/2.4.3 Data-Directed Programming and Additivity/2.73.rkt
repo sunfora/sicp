@@ -46,44 +46,92 @@
   (let ((type-tags (map type-tag args)))
     (apply (get op type-tags) (map contents args))))
 
-(install-polar-package)
-(install-rectangular-package)
+(define variable? symbol?)
 
-(define (real-part z) 
-  (apply-generic 'real-part z))
-(define (imag-part z) 
-  (apply-generic 'imag-part z))
-(define (magnitude z) 
-  (apply-generic 'magnitude z))
-(define (angle z) 
-  (apply-generic 'angle z))
+(define (same-variable? v1 v2) 
+  ;Are v1 and v2 the same variable?
+  (and (variable? v1) (variable? v2)
+       (eq? v1 v2)))
 
-(define (make-from-real-imag x y)
-  ((get 'make-from-real-imag 
-        'rectangular) 
-   x y))
+(define (deriv exp var)
+   (cond ((number? exp) 0)
+         ((variable? exp) 
+           (if (same-variable? exp var) 
+               1 
+               0))
+         (else ((get 'deriv (operator exp)) 
+                (operands exp) 
+                var))))
 
-(define (make-from-mag-ang r a)
-  ((get 'make-from-mag-ang 
-        'polar) 
-   r a))
+(define (operator exp) (car exp))
+(define (operands exp) (cdr exp))
 
-(define (add-complex z1 z2)
-  (make-from-real-imag 
-   (+ (real-part z1) (real-part z2))
-   (+ (imag-part z1) (imag-part z2))))
+(define (make op)
+  (lambda (operands)
+    (cons op operands)))
 
-(define (sub-complex z1 z2)
-  (make-from-real-imag 
-   (- (real-part z1) (real-part z2))
-   (- (imag-part z1) (imag-part z2))))
+(define (install-sum-package)
+  (define (deriv-sum ops var) 
+    (define (deriv- x) (deriv x var))
+    ((make '+) 
+     (map deriv- ops)))
 
-(define (mul-complex z1 z2)
-  (make-from-mag-ang 
-   (* (magnitude z1) (magnitude z2))
-   (+ (angle z1) (angle z2))))
+  (put 'deriv '+ deriv-sum) 
+  'done)
 
-(define (div-complex z1 z2)
-  (make-from-mag-ang 
-   (/ (magnitude z1) (magnitude z2))
-   (- (angle z1) (angle z2))))
+(define (install-product-package)
+  (define (clauses args var)
+    (if (null? args)
+      '()
+      (let ((head (car args))
+            (rest (cdr args)))
+        (cons (cons (deriv head var) rest)
+              (map (lambda (x)
+                     (cons head x))
+                   (clauses rest var))))))
+
+  (define (deriv-product ops var)
+    ((make '+) 
+     (map (make '*)                             
+          (clauses ops var))))  
+
+  (put 'deriv '* deriv-product)      
+  'done)
+
+(define (install-sub-package)
+  (define (deriv-sub ops var) 
+    (define (deriv- x) (deriv x var))
+    ((make '-) 
+     (map deriv- ops)))
+
+  (put 'deriv '- deriv-sub) 
+  'done)
+
+(define (install-trig-package)
+  (define (deriv-sin ops var)
+    (if (not (= 1 (length ops)))
+      (error 'deriv
+             "sin expected 1 argument ~a"
+             ops))
+    ((make '*) 
+     (list ((make 'cos) ops)
+           (deriv (car ops) var))))
+
+  (define (deriv-cos ops var)
+    (if (not (= 1 (length ops)))
+      (error 'deriv
+             "cos expected 1 argument ~a"
+             ops))
+    ((make '*) 
+     (list ((make '-) 
+            (list ((make 'sin) ops)))
+           (deriv (car ops) var))))
+
+  (put 'deriv 'sin deriv-sin)
+  (put 'deriv 'cos deriv-cos)
+  'done)
+
+(install-product-package)
+(install-sum-package)
+(install-sub-package)
+(install-trig-package)
