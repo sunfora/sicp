@@ -326,7 +326,6 @@ done
    ```
    > (deriv '(sin (* x x)) 'x)
    (* (cos (* x x)) (+ (* 1 x) (* x 1)))
-   "2.4.3 Data-Directed Programming and
    > (deriv '(cos (* x x)) 'x)
    (* (- (sin (* x x))) (+ (* 1 x) (* x 1)))
    ```
