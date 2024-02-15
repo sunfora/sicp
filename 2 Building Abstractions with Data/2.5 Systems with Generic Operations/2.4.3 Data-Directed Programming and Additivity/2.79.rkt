@@ -79,7 +79,7 @@
 (define (sub x y) (apply-generic 'sub x y))
 (define (mul x y) (apply-generic 'mul x y))
 (define (div x y) (apply-generic 'div x y))
-(define (equ? x y) (apply-generic 'equ x y))
+(define (equ? x y) (apply-generic 'equ? x y))
 
 (define (make-scheme-number n)
   ((get 'make 'scheme-number) n))
@@ -119,8 +119,7 @@
        (lambda (x y) (tag (* x y))))
   (put 'div '(scheme-number scheme-number)
        (lambda (x y) (tag (/ x y))))
-  (put 'equ '(scheme-number scheme-number)
-       (lambda (x y) (= x y)))
+  (put 'equ? '(scheme-number scheme-number) =)
   (put 'make 'scheme-number
        (lambda (x) (tag x)))
 
@@ -172,8 +171,7 @@
        (lambda (x y) (tag (mul-rat x y))))
   (put 'div '(rational rational)
        (lambda (x y) (tag (div-rat x y))))
-  (put 'equ '(rational rational)
-       (lambda (x y) (eq-rat? x y)))
+  (put 'equ? '(rational rational) eq-rat?)
   (put 'make 'rational
        (lambda (n d) (tag (make-rat n d))))
   'done)
@@ -280,9 +278,7 @@
   (put 'div '(complex complex)
        (lambda (z1 z2) 
          (tag (div-complex z1 z2))))
-  (put 'equ '(complex complex)
-       (lambda (z1 z2) 
-         (eq-complex? z1 z2)))
+  (put 'equ? '(complex complex) eq-complex?)
   (put 'make-from-real-imag 'complex
        (lambda (x y) 
          (tag (make-from-real-imag x y))))

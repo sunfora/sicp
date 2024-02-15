@@ -514,13 +514,12 @@ And it works!
 Итак нас просят добавить generic оператор сравнения.
 
 ```racket
-(define (equ? x y) (apply-generic 'equ x y))
+(define (equ? x y) (apply-generic 'equ? x y))
 ```
 
 - пакет **scheme-number**
   ```racket 
-  (put 'equ '(scheme-number scheme-number)
-       (lambda (x y) (= x y)))
+  (put 'equ? '(scheme-number scheme-number) =)
   ```
 - пакет **rational**
 
@@ -544,8 +543,7 @@ And it works!
     (and (= (numer x) (numer y))
          (= (denom x) (denom y))))
 
-  (put 'equ '(rational rational)
-       (lambda (x y) (eq-rat? x y)))
+  (put 'equ? '(rational rational) eq-rat?)
   ```
 - пакет **complex**
   ```racket
@@ -555,9 +553,7 @@ And it works!
          (= (angle z1) (angle z2))
          (= (magnitude z1) (magnitude z2))))
 
-  (put 'equ '(complex complex)
-       (lambda (z1 z2) 
-         (eq-complex? z1 z2)))
+  (put 'equ? '(complex complex) eq-complex?)
   ```
 
   Заметьте кстати что я проверяю на равенство вообще всё в числе. Почему так? А по той причине, что когда мы говорим, что некие числа равны, мы имеем в виду еще кучу разных свойств вроде того, что операции над ними должны приводит к определенным результатам, например разность наверняка должна всё таки приводит к нулю.
@@ -673,7 +669,7 @@ And it works!
 (define (sub x y) (apply-generic 'sub x y))
 (define (mul x y) (apply-generic 'mul x y))
 (define (div x y) (apply-generic 'div x y))
-(define (equ? x y) (apply-generic 'equ x y))
+(define (equ? x y) (apply-generic 'equ? x y))
 
 (define (make-scheme-number n)
   ((get 'make 'scheme-number) n))
@@ -713,8 +709,7 @@ And it works!
        (lambda (x y) (tag (* x y))))
   (put 'div '(scheme-number scheme-number)
        (lambda (x y) (tag (/ x y))))
-  (put 'equ '(scheme-number scheme-number)
-       (lambda (x y) (= x y)))
+  (put 'equ? '(scheme-number scheme-number) =)
   (put 'make 'scheme-number
        (lambda (x) (tag x)))
 
@@ -766,8 +761,7 @@ And it works!
        (lambda (x y) (tag (mul-rat x y))))
   (put 'div '(rational rational)
        (lambda (x y) (tag (div-rat x y))))
-  (put 'equ '(rational rational)
-       (lambda (x y) (eq-rat? x y)))
+  (put 'equ? '(rational rational) eq-rat?)
   (put 'make 'rational
        (lambda (n d) (tag (make-rat n d))))
   'done)
@@ -874,9 +868,7 @@ And it works!
   (put 'div '(complex complex)
        (lambda (z1 z2) 
          (tag (div-complex z1 z2))))
-  (put 'equ '(complex complex)
-       (lambda (z1 z2) 
-         (eq-complex? z1 z2)))
+  (put 'equ? '(complex complex) eq-complex?)
   (put 'make-from-real-imag 'complex
        (lambda (x y) 
          (tag (make-from-real-imag x y))))
