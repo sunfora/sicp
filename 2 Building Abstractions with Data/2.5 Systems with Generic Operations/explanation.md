@@ -1273,3 +1273,243 @@ And it works!
 (install-complex-package)
 ```
 
+# 2.5.2 Combining Data of Different Types
+
+Сперва добавим немножко новых методов: get-coercion, put-coercion.
+
+Для этого немножко реструктуризуем то что у нас раньше было.
+А я напомню было что-то такое:
+```racket
+;; generic table 
+
+(#%require (only racket
+                 make-hash
+                 hash-set!
+                 hash-ref))
+
+(define *generics-table*
+  (make-hash))
+
+(define (put method type value)
+  (let ((key (cons method type)))
+    (if (not (hash-ref *generics-table* key false))
+      (hash-set! *generics-table* key value)
+      (error 'put
+             "method ~a for type ~a already defined"
+             method type))))
+
+(define (get method type)
+  (let ((result (hash-ref 
+                  *generics-table* 
+                  (cons method type) 
+                  false)))
+    (if (not result)
+      (error 'get 
+             "method ~a for type ~a does not exist"
+             method type))
+    result))
+
+(define (has? method types)
+  (if (hash-ref *generics-table* 
+                (cons method types) 
+                false)
+    true false))
+```
+
+Давайте сделаем какой-то более универсальный способ создавать подобные таблицы: откажемся от глобальной переменной. И сделаем какой-то универсальный интерфейс.
+
+```racket
+(#%require (only racket
+                 make-hash
+                 hash-set!
+                 hash-ref))
+
+(define (setup-table . name-list)
+  (define name
+    (cond 
+      ((= 0 (length name-list))
+       'unonymous)
+      ((= 1 (length name-list))
+       (car name-list))
+      (else 
+       (error 'setup-table
+              "expected 0 or 1 argument"))))
+
+  (define table
+    (make-hash))
+
+  (define (put key-1 key-2 procedure)
+    (let ((key (cons key-1 key-2)))
+      (if (not (hash-ref table key false))
+        (hash-set! table key procedure)
+        (error 'put
+               "procedure for keys ~a ~a already defined"
+               key-1 key-2))))
+
+  (define (get key-1 key-2)
+    (hash-ref 
+      table 
+      (cons key-1 key-2) 
+      false))
+
+  (define (has? key-1 key-2)
+    (if (generics 'get key-1 key-2)
+      true
+      false))
+
+  (lambda (key . args)
+    (apply 
+      (cond ((eq? key 'put) 
+             put)
+            ((eq? key 'get)
+             get)
+            ((eq? key 'has?)
+             has?)
+            (else
+              (error 'table
+                     "unknown method for ~a table"
+                     name)))
+      args)))
+
+(define generics (setup-table 'generics))
+(define coercion (setup-table 'coercion))
+```
+
+Мы можем теперь добавить соответсвующий код, чтобы наши примеры работали из коробки.
+```racket
+(define (put key-1 key-2 method)
+  (generics 'put key-1 key-2 method))
+(define (get key-1 key-2)
+  (generics 'get key-1 key-2))
+
+(define (put-coercion key-1 key-2 method)
+  (coercion 'put key-1 key-2 method))
+(define (get-coercion key-1 key-2)
+  (coercion 'get key-1 key-2))
+```
+
+Но я лично предпочитаю немножко переписать код из упражнений, потому что мне нравится самодокументируемость того, что я вызываю put и get из таблицы названной generics.
+
+```racket
+(define (apply-generic op . args)
+  (define type-tags (map type-tag args))
+
+  (define (method-not-found)
+    (error 'apply-generic
+           "method not found ~a ~a"
+           op type-tags))
+
+  (define (coerce-2 op a1 a2)
+    (let* ((type1 (type-tag a1))
+           (type2 (type-tag a2))
+           (t1->t2 (coercion 'get type1 type2)) 
+           (t2->t1 (coercion 'get type2 type1)))
+      (cond (t1->t2
+             (apply-generic op (t1->t2 a1) a2))
+            (t2->t1
+             (apply-generic op a1 (t2->t1 a2)))
+            (else
+             (method-not-found)))))
+      
+  (let ((proc (generics 'get op type-tags)))
+      (cond (proc
+             (apply proc (map contents args)))
+            ((= (length args) 2)
+             (apply coerce-2 op args))
+            (else
+             (method-not-found)))))
+```
+
+## 2.81
+
+Итак, мы действительно при отсутствии метода с типами T, T, сделаем fallback в coercion и попробуем привести тип T к типу T. А потом рекурсивно запуститься, как бы реализуя стратегию перезагрузки.
+
+И в ответ на **первый** вопрос, что произойдёт, если мы предоставим следующие методы приведения:
+
+```racket
+(define (scheme-number->scheme-number n) n)
+(define (complex->complex z) z)
+
+(coercion 'put 'scheme-number 'scheme-number
+          scheme-number->scheme-number)
+
+(coercion 'put 'complex 'complex 
+          complex->complex)
+```
+
+И вызовем apply-generic на чём-нибудь, что не имеет процедуры для соответствующих типов, например:
+```racket
+(define (exp x y) 
+  (apply-generic 'exp x y))
+```
+
+В пакете **scheme-number**:
+```
+(generics 'put 'exp '(scheme-number scheme-number) 
+            (lambda (x y) (tag (expt x y))))
+```
+
+Поведение весьма очевидно: мы упадём в вечный цикл. 
+Давайте даже проверим:
+```
+> (#%require racket/trace)
+> (trace apply-generic)
+> (exp (make-complex-from-real-imag 1 2)
+       (make-complex-from-real-imag 3 4))
+
+>{apply-generic exp (complex rectangular 1 . 2) (complex rectangular 3 . 4)}
+>{apply-generic exp (complex rectangular 1 . 2) (complex rectangular 3 . 4)}
+>{apply-generic exp (complex rectangular 1 . 2) (complex rectangular 3 . 4)}
+>{apply-generic exp (complex rectangular 1 . 2) (complex rectangular 3 . 4)}
+>{apply-generic exp (complex rectangular 1 . 2) (complex rectangular 3 . 4)}
+>{apply-generic exp (complex rectangular 1 . 2) (complex rectangular 3 . 4)}
+>{apply-generic exp (complex rectangular 1 . 2) (complex rectangular 3 . 4)}
+>{apply-generic exp (complex rectangular 1 . 2) (complex rectangular 3 . 4)}
+>{apply-generic exp (complex rectangular 1 . 2) (complex rectangular 3 . 4)}
+...
+```
+
+Это конечно не адекватное поведение, потому что конечно самоприведение — деяние странное, потому что если бы мы нашли операцию с такими типами, то мы бы всё равно её нашли, в этом смысле самоприведение, сохраняя тип не решает никакой задачи. Но теоретически конечно такая вещь в графе, таблице или в отношении приведений штука допустимая. И программа наша не должна выпадать в осадок от того, что нам такое дали.
+
+На самом деле пассаж выше это ответ на **второй** вопрос, потому что мы, давайте я сокращу, обозначили проблему: у нас случается некоректное поведение программы, если какой-то разработчик добавит приведение типа к самому себе.
+
+И решением **третьего** пунка будет следующий код:
+```racket
+(define (apply-generic op . args)
+  (define type-tags (map type-tag args))
+
+  (define (method-not-found)
+    (error 'apply-generic
+           "method not found ~a ~a"
+           op type-tags))
+
+  (define (coerce-2 op a1 a2)
+    (let* ((type1 (type-tag a1))
+           (type2 (type-tag a2))
+           (t1->t2 (coercion 'get type1 type2)) 
+           (t2->t1 (coercion 'get type2 type1)))
+      (cond (t1->t2
+             (apply-generic op (t1->t2 a1) a2))
+            (t2->t1
+             (apply-generic op a1 (t2->t1 a2)))
+            (else
+             (method-not-found)))))
+      
+  (let ((proc (generics 'get op type-tags)))
+      (cond (proc
+             (apply proc (map contents args)))
+            ((and (= (length args) 2)
+                  (not (apply equal? type-tags)))
+             (apply coerce-2 op args))
+            (else
+             (method-not-found)))))
+```
+
+Давайте запустим наш предыдущий пример и увидим, что он корректно работает:
+```
+> (exp (make-complex-from-real-imag 1 2)
+       (make-complex-from-real-imag 3 4))
+; apply-generic: method not found exp (complex complex) 
+; [,bt for context]
+```
+
