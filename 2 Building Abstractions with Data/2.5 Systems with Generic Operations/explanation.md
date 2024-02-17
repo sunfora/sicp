@@ -549,15 +549,12 @@ And it works!
   ```racket
   (define (eq-complex? z1 z2)
     (and (= (real-part z1) (real-part z2))
-         (= (imag-part z1) (imag-part z2))
-         (= (angle z1) (angle z2))
-         (= (magnitude z1) (magnitude z2))))
+         (= (imag-part z1) (imag-part z2))))
 
   (put 'equ? '(complex complex) eq-complex?)
   ```
 
-
-  Вообще операторы сравнения это не самая тривиальная штука и всегда к ним надо подходит, что говорится, with great care.
+  Вообще надо заметить, операторы сравнения это не самая тривиальная штука и всегда к ним надо подходит, что говорится, with great care.
 
 И мы можем радоваться:
 
@@ -850,9 +847,7 @@ And it works!
      (- (angle z1) (angle z2))))
   (define (eq-complex? z1 z2)
     (and (= (real-part z1) (real-part z2))
-         (= (imag-part z1) (imag-part z2))
-         (= (angle z1) (angle z2))
-         (= (magnitude z1) (magnitude z2))))
+         (= (imag-part z1) (imag-part z2))))
   ;; interface to rest of the system
   (define (tag z) (attach-tag 'complex z))
   (put 'add '(complex complex)
@@ -1228,9 +1223,7 @@ And it works!
      (- (angle z1) (angle z2))))
   (define (eq-complex? z1 z2)
     (and (= (real-part z1) (real-part z2))
-         (= (imag-part z1) (imag-part z2))
-         (= (angle z1) (angle z2))
-         (= (magnitude z1) (magnitude z2))))
+         (= (imag-part z1) (imag-part z2))))
   (define (=zero? z1)
     (= (magnitude z1) 0))
 

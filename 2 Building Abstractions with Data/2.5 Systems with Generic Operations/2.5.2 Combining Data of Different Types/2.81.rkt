@@ -331,9 +331,7 @@
      (- (angle z1) (angle z2))))
   (define (eq-complex? z1 z2)
     (and (= (real-part z1) (real-part z2))
-         (= (imag-part z1) (imag-part z2))
-         (= (angle z1) (angle z2))
-         (= (magnitude z1) (magnitude z2))))
+         (= (imag-part z1) (imag-part z2))))
   (define (=zero? z1)
     (= (magnitude z1) 0))
 
