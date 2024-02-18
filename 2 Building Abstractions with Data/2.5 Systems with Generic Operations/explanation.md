@@ -593,3 +593,348 @@ And it works!
 
 Отвечая на последний вопрос: пример, когда подобная техника не достаточно общая — как раз то, что мы видим выше, а именно случай, когда у нас числа могут быть приведены к комплексным, но они не приведены. И второй случай это какие-то смешанные операции вроде с типами вроде ```(rational rational integer)```, например это может быть операция нахождения корней числа в конечном поле, и мы если закинем что-нибудь вида (integer rational integer), то проиграем. Потому что у нас будут расмотрены варианты: (integer integer integer) и (rational rational rational), но не (rational rational integer).
 
+## 2.83
+
+Итак, давайте сначала разработает механизм с помощью которого мы будем работать с башней типов и только потом реализуем проверим на каком-нибудь примере.
+
+Я считаю что вопросы дел башни — вопросы энумерации типов, нахождения предков и т.д. и т.п.
+Поэтому приведения мы всё так же будем хранить в таблице coercion. 
+
+И raise будет комбинацией взаимодействия с tower и coercion.
+
+```racket
+(define (setup-type-tower)
+  (define tower (setup-table 'tower))
+
+  (define (prev type)
+    (tower 'get 'prev type))
+
+  (define (next type)
+    (tower 'get 'next type))
+
+  (define (first)
+    (tower 'get 'first false))
+
+  (define (last)
+    (define (scroll type)
+      (if (next type)
+        (scroll (next type))
+        type))
+    (scroll (first)))
+
+  (define (registred)
+    (define (scroll type result)
+      (if type
+        (scroll (next type) (cons type result))
+        (reverse result)))
+    (scroll (first) '()))
+
+  (define (register new-type)
+    (if (in new-type)
+      (error 'register 
+             "type is already registred"))
+    (tower 'put 'in new-type true)
+    (for-each (lambda (old-type)
+                (tower 'put '< 
+                       (list old-type new-type)
+                       true))
+              (registred))
+
+    (if (not (first))
+      (tower 'put 'first false new-type)
+      (let ((last-type (last)))
+        (tower 'put 'next last-type new-type)
+        (tower 'put 'prev new-type last-type))))
+
+  (define (restrict fn)
+    (define (restrict-param type)
+      (if (not (in type))
+        (error 'tower
+               "type ~a is not yet registred"
+               type)))
+    (lambda params      
+      (for-each restrict-param
+                params)
+      (apply fn params)))
+
+  (define (=t lhs rhs)
+    (restrict lhs) (restrict rhs)
+    (equal? lhs rhs))
+
+  (define (<t lhs rhs)
+    (restrict lhs) (restrict rhs)
+    (tower 'get '< (list lhs rhs)))
+
+  (define (>t lhs rhs)
+    (<t rhs lhs))
+
+  (define (<=t lhs rhs)
+    (or (=t lhs rhs)
+        (<t lhs rhs)))
+
+  (define (>=t lhs rhs)
+      (or (=t lhs rhs)
+          (>t lhs rhs)))
+  
+  (define (in type)
+    (tower 'get 'in type))
+
+  (let ((export-methods
+         (list (list 'register register)
+          (list 'registred registred)
+          (list 'in in)
+          (list 'next (restrict next))
+          (list 'prev (restrict prev))
+          (list '= (restrict =t))
+          (list '< (restrict <t))
+          (list '<= (restrict <=t))
+          (list '> (restrict >t))
+          (list '>= (restrict >=t)))))
+    (lambda (action . params)
+      (let ((result (assq action export-methods)))
+        (if result 
+          (apply (cadr result) params)
+          (error 'tower 
+                 "unknown method ~a"
+                 action))))))
+```
+
+Немножечко я бы сказал, что verbose, но работу свою делает.
+Мы просто делаем:
+```racket
+(tower 'register 'integer)
+(tower 'register 'rational)
+(tower 'register 'real)
+(tower 'register 'complex)
+```
+
+И можем посмотреть на результат:
+```
+> (tower 'registred)
+(integer rational real complex)
+> (tower 'next 'integer)
+rational
+> (tower 'prev 'integer)
+#f
+> (tower 'next 'wonderful)
+; tower: type wonderful is not yet registred [,bt for context]
+> (tower '< 'integer 'complex)
+#t
+> (tower '> 'integer 'complex)
+#f
+> (tower '<= 'integer 'complex)
+#t
+> (tower '>= 'integer 'complex)
+#f
+> (tower '>= 'integer 'integer)
+#t
+> (tower '< 'integer (tower 'next 'integer))
+#t
+> (tower '< 'wonderful 'complex)
+; tower: type wonderful is not yet registred [,bt for context]
+```
+
+Теперь перейдём к реализации raise.
+Всё здесь достаточно просто получаем следующий тип, если его нет, выбрасываем ошибку.
+Если есть то ищем в таблице coercion процедуру, если таковой не найдётся, выбрасываем ошибку.
+Если всё есть, то применяем к аргументу процедуру.
+
+```racket
+(define (raise obj)
+  (let* ((type (type-tag obj))
+         (next (tower 'next type))
+         (type->next (coercion 'get type next)))
+    (cond ((not next)
+           (error 'raise
+                  "cannot raise further ~a"
+                  type))
+          ((not type->next)
+           (error 'raise
+                  "cannot find coercion ~a->~a"
+                  type next)))
+    (type->next obj)))
+```
+
+Теперь осталось протестировать это поделие. 
+Для этого нам надо предоставить соответствующие типы данных.
+
+И у нас небольшая проблема: scheme по умолчанию идёт уже с этими типами данных. Причём между ними происходится всякая нехорошая конверсия в духе того, что мы хотим установить. Поэтому можно получить какие-то рандомные неожиданные баги.
+
+Чтобы это немного устранить, давайте сначала грохнем пакет scheme-number и избавимся от implicit конверсий, которые мы ввели раньше. 
+
+```racket
+(define (attach-tag type-tag contents)
+  (cons type-tag contents))
+        
+(define (type-tag datum)
+  (cond ((pair? datum)
+         (car datum))
+        (else 
+         (error 'type-tag 
+                "bad tagged datum ~a" datum))))
+    
+(define (contents datum)
+  (cond ((pair? datum) 
+         (cdr datum))
+        (else 
+         (error 'contents 
+                "bad tagged datum ~a" datum))))
+
+(define (apply-generic op . args)
+  (define (method-not-found)
+    (error 'apply-generic
+           "method not found ~a ~a"
+           op (map type-tag args)))
+  (define (search args)
+    (generics 'get op (map type-tag args)))
+  (define (has? args) (if (search args) true false))
+  (define (apply-strip args)
+    (apply (search args) (map contents args)))
+  (if (has? args)
+    (apply-strip args)
+    (method-not-found)))
+```
+
+И сделаем пакет integer:
+
+```racket
+(define (install-integer-package)
+  (define (tag x)
+    (attach-tag 'integer x))
+
+  (define (div a b)
+    (let ((make (generics 'get 'make 'rational)))
+      (if make
+        (make a b)
+        (error 'integer-package/div
+               "rational package is not installed"))))
+
+  (define (make x) 
+    (if (not (integer? x))
+      (error 'integer-package/make
+             "expected integer but got ~a"
+             x))
+    (tag x))
+
+  (generics 'put 'add '(integer integer)
+       (lambda (x y) (tag (+ x y))))
+  (generics 'put 'sub '(integer integer)
+       (lambda (x y) (tag (- x y))))
+  (generics 'put 'mul '(integer integer)
+       (lambda (x y) (tag (* x y))))
+  (generics 'put 'div '(integer integer) div)
+  (generics 'put 'equ? '(integer integer) =)
+  (generics 'put '=zero? '(integer)
+       (lambda (x) (= x 0)))
+  (generics 'put 'make 'integer make)
+  'done)
+```
+
+Заметьте кстати что я не умею делить целые числа, поэтому я просто делегирую эту внутри пакета другому пакету.
+И в случае если я это сделать не смогу, то я упаду в ошибку.
+
+Другой подход мог бы заключаться в том, чтобы вообще не предоставлять подобный метод (ну а зачем в самом деле). И заместо этого позволить apply-generic найти соответствующий метод у rational, привести integer->rational и произвести деление уже там. Давайте это сейчас запомним и в следующий раз протестируем.
+
+```racket
+(define (make-integer n)
+  ((generics 'get 'make 'integer) n))
+(install-integer-package)
+```
+
+```
+> (add (make-integer 1) (make-integer 2))
+(integer . 3)
+> (make-integer 1)
+(integer . 1)
+> (make-integer 1.5)
+; integer-package/make: expected integer but got 1.5 [,bt for context]
+> (div (make-integer 1) (make-integer 2))
+; integer-package/div: rational package is not installed [,bt for context]
+```
+
+rational это всё тот же пакет, за исключением может быть конструктора, но я не буду как-то ограничивать на самом деле входные данные, пофигу
+
+real это по-сути переименнованный scheme-number, за исключением make, который тоже теперь должен выбрасывать ошибку:
+```racket
+(define (install-real-package)
+  (define (tag x)
+    (attach-tag 'real x))
+  (define (make x)
+    (if (not (real? x))
+      (error 'real-package/make
+             "expected real but got ~a"
+             x))
+      (tag x))
+  (generics 'put 'add '(real real)
+       (lambda (x y) (tag (+ x y))))
+  (generics 'put 'sub '(real real)
+       (lambda (x y) (tag (- x y))))
+  (generics 'put 'mul '(real real)
+       (lambda (x y) (tag (* x y))))
+  (generics 'put 'div '(real real)
+       (lambda (x y) (tag (/ x y))))
+  (generics 'put 'equ? '(real real) =)
+  (generics 'put '=zero? '(real)
+       (lambda (x) (= x 0)))
+  (generics 'put 'make 'real make)
+  'done)
+```
+
+и complex это всё тот же пакет, плюс я добавлю: 
+```racket
+(define make-complex make-complex-from-real-imag)
+```
+
+Теперь давайте проверим, что у нас ничего не работает: мы подготовили для этого почву!
+
+```
+> (raise (make-integer 1))
+; raise: cannot find coercion integer->rational [,bt for context]
+```
+
+Отлично, у нас падает всё по той причине, что не нашлось соответствующего приведения, давайте добавим!
+```racket
+(define (install-numerical-tower-package)
+  (tower 'register 'integer)
+  (tower 'register 'rational)
+  (tower 'register 'real)
+  (tower 'register 'complex)
+
+  (define (make-rational a b)
+    ((generics 'get 'make 'rational) a b))
+  (define (make-complex a b)
+    ((generics 'get 'make-from-real-imag 'complex) a b))
+  (define (make-real x)
+    ((generics 'get 'make 'real) x))
+
+  (define (integer->rational i)
+    (make-rational (contents i)
+                   1))
+  (define (rational->real r)
+    (make-real (/ (numer r) (denom r))))
+  (define (real->complex r)
+    (make-complex (contents r) 0))
+
+  (coercion 'put 'integer 'rational integer->rational)
+  (coercion 'put 'rational 'real rational->real)
+  (coercion 'put 'real 'complex real->complex)
+  'done)
+```
+
+Я их не добавляю в пакеты, потому что по-существу это не работа для индивидуальных пакетов.
+А де-факто работа отдельного пакета.
+
+
+Давайте наконец посмотрим на наше чудо-юдо:
+```
+> (raise (make-integer 2))
+(rational 2 . 1)
+> (raise (raise (make-integer 2)))
+(real . 2)
+> (raise (raise (raise (make-integer 2))))
+(complex rectangular 2 . 0)
+> (raise (raise (raise (raise (make-integer 2))))) 
+; raise: cannot raise further complex [,bt for context]
+> (raise (attach-tag 'wonderful '()))
+; tower: type wonderful is not yet registred [,bt for context]
+```
