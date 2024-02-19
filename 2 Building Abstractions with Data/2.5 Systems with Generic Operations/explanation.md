@@ -938,3 +938,195 @@ real это по-сути переименнованный scheme-number, за �
 > (raise (attach-tag 'wonderful '()))
 ; tower: type wonderful is not yet registred [,bt for context]
 ```
+
+## 2.84
+
+Ну давайте сделаем наш apply generic: если не нашли метод, то попробуем повысить тип до некого единого.
+И если это не получится то попробуем еще раз поднять тип, пока не упрёмся в максимальный.
+
+```racket
+(define (apply-generic op . args)
+  (define (tags args)
+    (map type-tag args))
+
+  (define (method-not-found)
+    (error 'apply-generic
+           "method not found ~a ~a"
+           op (tags args)))
+
+  (define (search args)
+    (generics 'get op (tags args)))
+  (define (has? args) 
+    (generics 'has? op (tags args)))
+  
+  (define (apply-strip args)
+    (apply (search args) (map contents args)))
+
+  (define (filter p? seq)
+    (if (null? seq)
+      seq
+      (if (p? (car seq))
+        (cons (car seq)
+              (filter p? (cdr seq)))
+        (filter p? (cdr seq)))))
+
+  (define (tower-tags args) 
+    (filter 
+      (lambda (type)
+        (tower 'in type))
+      (tags args)))
+
+  (define (can-be-raised? args)
+    (define (can-raise? type)
+      (if (tower 'next type)
+        true false))
+    (define (loop types)
+      (and (not (null? types))
+           (or (can-raise? (car types))
+               (loop (cdr types)))))
+    (loop (tower-tags args)))
+
+  (define (max-type args)
+    (define (loop types)
+      (let ((first (car types))
+            (rest (cdr types)))
+        (if (null? rest)
+          first
+          (let ((second (loop rest)))
+            (if (tower '< first second)
+              second
+              first)))))
+    (loop (tower-tags args))) 
+
+  (define (raise-to type arg)
+    (let ((arg-type (type-tag arg)))
+      (if (or (not (tower 'in arg-type))
+              (equal? type arg-type))
+        arg
+        (raise-to type (raise arg)))))
+
+  (define (raise-to-common args)
+    (map  
+      (lambda (arg)
+        (raise-to (max-type args) arg))
+      args))
+
+  (define (raise-all args)
+    (let ((result (raise-to-common args)))
+      (if (not (equal? (tags result) 
+                       (tags args)))
+        result
+        (map (lambda (arg)
+               (if (tower 'in (type-tag arg))
+                 (raise arg)
+                 arg))
+             result))))
+
+  (cond ((has? args)
+         (apply-strip args))
+        ((can-be-raised? args)
+         (apply apply-generic op (raise-all args)))
+        (else 
+         (method-not-found))))
+```
+
+Ну в общем-то давайте я на всякий случай прокоментирую:
+- tower-tags достаёт из аргументов типы, которые находятся в таблице
+- max-type ищет максимальный тип
+- raise-to делает raise до соответствующего типа
+- raise-to-common делает raise до общего типа среди существующих
+- raise-all делает raise-to-common или повышает на один уровень выше
+
+Таким образом когда мы делаем например ```(div (make-integer 1) (make-real 2))```, мы получаем ```(real . 1/2)```.
+А если мы например сделаем ```(magnitude (make-integer 1))```, мы будем поднимать тип до того момента, пока он не станет комплексным числом и получим соответственно 1.
+
+Напомню, что в пакете integer определение div было следующим:
+```racket
+(define (div a b)
+  (let ((make (generics 'get 'make 'rational)))
+    (if make
+      (make a b)
+      (error 'integer-package/div
+             "rational package is not installed"))))
+```
+
+Давайте его удалим, потому что у нас теперь есть более совершенный механизм, который позволяет деление делегировать рациональным числам.
+
+
+И потестим:
+
+```racket
+> (div (make-integer 1) (make-integer 2))
+(rational 1 . 2)
+> (mul (make-integer 2) (make-complex-from-mag-ang 3 4))
+(complex polar 6 . 4)
+> (add (make-complex 1 3) (make-rational 1 2))
+(complex rectangular 3/2 . 3)
+> (real-part (make-integer 1))
+1
+> (angle (make-integer 1))
+0
+> (imag-part (make-integer 2))
+0
+> (numer (make-integer 3))
+3
+> (denom (make-integer 3))
+1
+> (numer (make-real 1))
+; apply-generic: method not found numer (complex) [,bt for context]
+```
+
+Ну... последнее сообщение показывает некоторую проблему в нашей реализации.
+Она на самом деле легко фиксится, потому что нам надо просто проэмулировать рекурсивное применение.
+
+Чем-нибудь вроде такого:
+```racket
+(define (apply-generic op . args)
+  ; ...
+  (define (apply-loop args)
+    (cond ((has? args)
+           (apply-strip args))
+          ((can-be-raised? args)
+           (apply-loop (raise-all args)))
+          (else 
+            (method-not-found))))
+  (apply-loop args))
+```
+
+И теперь всё работает как положено: 
+```
+> (numer (make-real 1))
+; apply-generic: method not found numer (real) [,bt for context]
+```
+
+Давайте попробуем еще маленькую деталь, а именно случай, когда raise мы делаем с участием аргументов, которые в башне не находятся.
+
+```racket
+(define (wonderful w i)
+  (apply-generic 'wonderful w i))
+
+(define (make-wonderful message)
+  (attach-tag 'wonderful message))
+
+(define (display-n message n)
+  (if (not (zero? n))
+    (begin 
+      (display message)
+      (display-n message (dec n)))))
+
+(generics 'put 'wonderful '(wonderful rational)
+     (lambda (message rat)
+       (let ((rat (attach-tag 'rational rat)))
+         (display-n message (numer rat)) (newline)
+         (display "-") (newline)
+         (display-n message (denom rat)) (newline))))
+```
+
+```
+> (wonderful (make-wonderful "wow!") (make-integer 3))
+wow!wow!wow!
+-
+wow!
+```
+
+Ну в общем прекрасно работает. А на этом в этом задании всё.
