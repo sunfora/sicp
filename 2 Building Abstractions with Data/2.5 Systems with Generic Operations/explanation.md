@@ -1130,3 +1130,111 @@ wow!
 ```
 
 Ну в общем прекрасно работает. А на этом в этом задании всё.
+
+## 2.85
+
+Ну это на самом деле почти что копипаста raise
+```racket
+(define (project obj)
+  (let* ((type (type-tag obj))
+           (prev (tower 'prev type))
+           (type->prev (coercion 'get type prev)))
+      (cond ((not prev)
+             (error 'project
+                    "cannot project further ~a"
+                    type))
+            ((not type->prev)
+             (error 'project
+                    "cannot find coercion ~a->~a"
+                    type prev)))
+      (type->prev obj)))
+
+(define (drop obj)
+  (if (tower 'prev (type-tag obj))
+    (let ((result (project obj)))
+      (if (equ? result obj)
+        (drop result) 
+        obj))
+    obj))
+```
+
+Давайте добавим методов:
+```racket
+(define (rational->integer r)
+  (make-integer (quotient (numer r) 
+                          (denom r))))
+(define (real->rational r)
+  (let ((r (contents r)))
+    (cond ((eqv? +inf.0 r)
+           (make-rational (expt 2 1024)
+                          1))
+          ((eqv? -inf.0 r)
+           (make-rational (expt -2 1024)
+                          1))
+          ((eqv? +nan.0 r)
+           (make-rational 0 1))
+          ((and (exact? r)
+                (rational? r))
+           (make-rational 
+             (numerator r)
+             (denominator r)))
+          (else 
+           (let ((r (rationalize
+                      (inexact->exact r)
+                      1/10000)))
+             (make-rational
+               (numerator r)
+               (denominator r)))))))
+(define (complex->real c)
+  (make-real (real-part c)))
+
+(coercion 'put 'rational 'integer  rational->integer)
+(coercion 'put 'real 'rational  real->rational)
+(coercion 'put 'complex 'real  complex->real)
+```
+
+И потестируем:
+```
+> (drop (make-complex 1 0))
+(integer . 1)
+> (drop (make-complex 1.5 2.5))
+(complex rectangular 1.5 . 2.5)
+> (drop (make-complex 1.5 0.0))
+(rational 3 . 2)
+> (drop (make-complex 1.5358732589 0.0))
+(real . 1.5358732589)
+> (drop (attach-tag 'wonderful "wow!"))
+; tower: type wonderful is not yet registred [,bt for context]
+> (drop (make-rational 3 1))
+(integer . 3)
+> (drop (make-real 5.0))
+(integer . 5)
+```
+
+Теперь добавим drop к apply-generic получив что-то вот такое:
+```racket
+(let ((result (apply-loop args)))
+  (if (and (tagged? result)
+           (tower 'in (type-tag result)))
+    (drop result)
+    result))
+```
+
+Мы проверяем является ли наш объектик тегнутым, и если да, то проверяем, лежит ли он в башне.
+И если да, то дропаем.
+
+А что касается предиката tagged?, его надо добавить, что-нибудь такое в нашем случае:
+```racket
+(define (tagged? datum)
+  (and (pair? datum)
+       (symbol? (car datum))))
+```
+
+И всё будет работать:
+```
+> (add (make-complex 1/3 2/3) (make-complex 3/5 -2/3))
+(rational 14 . 15)
+> (div (make-complex-from-mag-ang 5 3)
+       (make-complex-from-mag-ang 1 3))
+(integer . 5)
+```
