@@ -1238,3 +1238,187 @@ wow!
        (make-complex-from-mag-ang 1 3))
 (integer . 5)
 ```
+
+## 2.86
+
+Чтобы всё работало нам нужны следующие изменения:
+1. Новые generic операции
+   ```racket
+   (define (square-root x) (apply-generic 'square-root x))
+   (define (sine x) (apply-generic 'sine x))
+   (define (cosine x) (apply-generic 'cosine x))
+   (define (arctan x y) (apply-generic 'arctan x y))
+   ```
+2. Мы можем поместить в пакет real эти операции. Вообще говоря интересно заметить, что единственную операцию, которую мы не делали с вами — это вычисление арктангенса. Всё остальное в рамках курса разбиралось.
+   ```racket
+   (generics 'put 'sine '(real) 
+        (lambda (x) (tag (sin x))))
+   (generics 'put 'cosine '(real)
+        (lambda (x) (tag (cos x))))
+   (generics 'put 'arctan '(real real)
+        (lambda (x y) (tag (atan x y)))
+   (generics 'put 'square-root '(real)
+        (lambda (x) (tag (sqrt x))))
+   ```
+3. Поменять coercion в башне:
+   ```racket
+   (define (real->complex r)
+     (make-complex (drop r) (make-integer 0)))
+   (define (integer->real x)
+     (rational->real (integer->rational x)))
+   (coercion 'put 'integer 'real integer->real)
+
+   (define (complex->real c)
+     (let ((r (real-part c)))
+       (cond ((eq? 'real (type-tag r))
+              r)
+             ((coercion 'get (type-tag r) 'real)
+              ((coercion 'get (type-tag r) 'real) r))
+             (else
+              (error 'complex->real
+                     "cannot coerce to real-part ~a of complex ~a"
+                     r c)))))
+   ```
+4. Поменять пакеты polar, rectangular и complex.
+   ```racket
+   (define (install-rectangular-package)
+     ;; internal procedures
+     (define (square x) (mul x x))
+     (define (real-part z) (car z))
+     (define (imag-part z) (cdr z))
+     (define (make-from-real-imag x y) 
+       (cons x y))
+     (define (magnitude z)
+       (square-root (add (square (real-part z))
+                         (square (imag-part z)))))
+     (define (angle z)
+       (arctan (imag-part z) (real-part z)))
+     (define (make-from-mag-ang r a)
+       (cons (mul r (cosine a)) (mul r (sine a))))
+     ;; interface to the rest of the system
+     (define (tag x) 
+       (attach-tag 'rectangular x))
+     (generics 'put 'real-part '(rectangular) real-part)
+     (generics 'put 'imag-part '(rectangular) imag-part)
+     (generics 'put 'magnitude '(rectangular) magnitude)
+     (generics 'put 'angle '(rectangular) angle)
+     (generics 'put 'make-from-real-imag 'rectangular
+          (lambda (x y) 
+            (tag (make-from-real-imag x y))))
+     (generics 'put 'make-from-mag-ang 'rectangular
+          (lambda (r a) 
+            (tag (make-from-mag-ang r a))))
+     'done)
+
+   (define (install-polar-package)
+     ;; internal procedures
+     (define (square x) (mul x x))
+     (define (magnitude z) (car z))
+     (define (angle z) (cdr z))
+     (define (make-from-mag-ang r a) (cons r a))
+     (define (real-part z)
+       (mul (magnitude z) (cosine (angle z))))
+     (define (imag-part z)
+       (mul (magnitude z) (sine (angle z))))
+     (define (make-from-real-imag x y)
+       (cons (square-root (add (square x) (square y)))
+             (arctan y x)))
+     ;; interface to the rest of the system
+     (define (tag x) (attach-tag 'polar x))
+     (generics 'put 'real-part '(polar) real-part)
+     (generics 'put 'imag-part '(polar) imag-part)
+     (generics 'put 'magnitude '(polar) magnitude)
+     (generics 'put 'angle '(polar) angle)
+     (generics 'put 'make-from-real-imag 'polar
+          (lambda (x y) 
+            (tag (make-from-real-imag x y))))
+     (generics 'put 'make-from-mag-ang 'polar
+          (lambda (r a) 
+            (tag (make-from-mag-ang r a))))
+     'done)
+
+   (define (install-complex-package)
+     ;; imported procedures from rectangular 
+     ;; and polar packages
+     (define (make-from-real-imag x y)
+       ((generics 'get 'make-from-real-imag 
+             'rectangular) 
+        x y))
+     (define (make-from-mag-ang r a)
+       ((generics 'get 'make-from-mag-ang 'polar) 
+        r a))
+     ;; internal procedures
+     (define (add-complex z1 z2)
+       (make-from-real-imag 
+        (add (real-part z1) (real-part z2))
+        (add (imag-part z1) (imag-part z2))))
+     (define (sub-complex z1 z2)
+       (make-from-real-imag 
+        (sub (real-part z1) (real-part z2))
+        (sub (imag-part z1) (imag-part z2))))
+     (define (mul-complex z1 z2)
+       (make-from-mag-ang 
+        (mul (magnitude z1) (magnitude z2))
+        (add (angle z1) (angle z2))))
+     (define (div-complex z1 z2)
+       (make-from-mag-ang 
+        (div (magnitude z1) (magnitude z2))
+        (sub (angle z1) (angle z2))))
+     (define (eq-complex? z1 z2)
+       (and (equ? (real-part z1) (real-part z2))
+            (equ? (imag-part z1) (imag-part z2))))
+     (define (=zero? z1)
+       (=zero? (magnitude z1)))
+
+     ;; interface to rest of the system
+     (define (tag z) (attach-tag 'complex z))
+     (generics 'put 'add '(complex complex)
+          (lambda (z1 z2) 
+            (tag (add-complex z1 z2))))
+     (generics 'put 'sub '(complex complex)
+          (lambda (z1 z2) 
+            (tag (sub-complex z1 z2))))
+     (generics 'put 'mul '(complex complex)
+          (lambda (z1 z2) 
+            (tag (mul-complex z1 z2))))
+     (generics 'put 'div '(complex complex)
+          (lambda (z1 z2) 
+            (tag (div-complex z1 z2))))
+     (generics 'put 'equ? '(complex complex) eq-complex?)
+     (generics 'put '=zero? '(complex) =zero?)
+     (generics 'put 'make-from-real-imag 'complex
+          (lambda (x y) 
+            (tag (make-from-real-imag x y))))
+     (generics 'put 'make-from-mag-ang 'complex
+          (lambda (r a) 
+            (tag (make-from-mag-ang r a))))
+     (generics 'put 'real-part '(complex) real-part)
+     (generics 'put 'imag-part '(complex) imag-part)
+     (generics 'put 'magnitude '(complex) magnitude)
+     (generics 'put 'angle '(complex) angle)
+
+     'done)
+   ```
+
+И давайте немного проверим что получилось:
+```
+> (define z (make-complex (make-integer 3) (make-integer 4)))
+> z
+(complex rectangular (integer . 3) integer . 4)
+> (magnitude z) 
+(integer . 5)
+> (angle z)
+(real . 0.9272952180016122)
+> (mul z z)
+(complex polar (integer . 25) real . 1.8545904360032244)
+> (magnitude (mul z z))
+(integer . 25)
+> (magnitude (make-integer 5))
+(integer . 5)
+> (mul (make-rational 5 6) (make-complex-from-mag-ang (make-integer 2) (make-rational 3 4)))
+(complex polar (rational 5 . 3) rational 3 . 4)
+> (add (make-complex (make-integer 1) (make-integer 2))
+       (make-complex (make-real 1) (make-rational -2 1)))
+(integer . 2)
+```
+
