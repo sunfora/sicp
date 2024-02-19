@@ -149,7 +149,7 @@
 (define tower (setup-type-tower))
 
 
-
+;; type data primitives
 (define (raise obj)
   (let* ((type (type-tag obj))
          (next (tower 'next type))
@@ -164,7 +164,6 @@
                   type next)))
     (type->next obj)))
 
-;; type data primitives
 (define (attach-tag type-tag contents)
   (cons type-tag contents))
         
