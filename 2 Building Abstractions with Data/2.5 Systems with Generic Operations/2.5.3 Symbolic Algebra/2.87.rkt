@@ -550,8 +550,6 @@
   (generics 'put 'repr '(complex) repr-complex)
   'done)
 
-(#%require racket/trace)
-
 (define (install-polynomial-package)
   ;; internal procedures
   ;; representation of poly
@@ -684,6 +682,9 @@
           (terms (term-list p)))
       (repr-termlist var terms)))
 
+  (define (poly-zero? p)
+    (empty-termlist? (term-list p)))
+
   ;; interface to rest of the system
   (define (tag p) (attach-tag 'polynomial p))
   (generics 'put 'add '(polynomial polynomial)
@@ -692,6 +693,7 @@
   (generics 'put 'mul '(polynomial polynomial)
        (lambda (p1 p2) 
          (tag (mul-poly p1 p2))))
+  (generics 'put '=zero? '(polynomial) poly-zero?)
   (generics 'put 'repr '(polynomial) repr-poly)
   (generics 'put 'make 'polynomial
        (lambda (var terms) 
@@ -825,19 +827,3 @@
 (install-complex-package)
 (install-numerical-tower-package)
 (install-polynomial-package)
-
-(define p1
-  (make-polynomial 
-    'x
-    `((1 ,(make-rational 1 3))
-      (2 ,(make-integer 1)))))
-
-(define p2
-  (make-polynomial
-    'x
-    `((1 ,(make-rational 2 3))
-      (3 ,(make-integer 5)))))
-
-(display (repr p1)) (newline)
-(display (repr p2)) (newline)
-(display (repr (mul p1 p2))) (newline)

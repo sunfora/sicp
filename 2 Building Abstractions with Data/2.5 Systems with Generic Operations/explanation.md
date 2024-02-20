@@ -1501,4 +1501,36 @@ wow!
 
 ## 2.87
 
+Ну на данный момент =zero? это просто почти синоним empty-termlist?
+Поэтому давайте добавим и всё у нас будет отлично работать.
 
+```racket
+(define (poly-zero? p)
+  (empty-term-list? (term-list p)))
+
+(generics 'put '=zero? '(polynomial) poly-zero?)
+```
+
+И какой-нибудь очевидный простенький тест:
+```
+> (define p1
+    (make-polynomial 
+      'x
+      `((1 ,(make-rational 1 3))
+        (2 ,(make-integer 1)))))
+
+> (define p2
+    (make-polynomial
+      'x
+      `((1 ,(make-rational -1 3))
+        (2 ,(make-integer -1)))))
+
+> (display (repr p1)) (newline)
+[1]x^2 + [1/3]x^1
+> (display (repr p2)) (newline)
+[-1]x^2 + [-1/3]x^1
+> (display (repr (add p1 p2))) (newline)
+[0]x^0
+> (=zero? (add p1 p2))
+#t
+```
