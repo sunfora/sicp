@@ -1424,5 +1424,81 @@ wow!
 #t
 ```
 
+# 2.5.3 Symbolic Algebra
+
+Я добавил новую generic операцию: repr.
+
+```racket
+(define (repr x) (apply-generic 'repr x))
+
+(define (install-integer-package)
+  ...
+  (generics 'put 'repr '(integer) number->string)
+  ...
+  'done)
+
+(define (install-rational-package)
+  ...
+  (define (repr r)
+    (string-append 
+      (number->string (numer r))
+      "/"
+      (number->string (denom r))))
+  (generics 'put 'repr '(rational) repr)
+  ...
+  'done)
+
+(define (install-real-package)
+  ...
+  (generics 'put 'repr '(real) number->string)
+  ...
+  'done)
+
+(define (install-complex-package)
+  ...
+  (define (repr-complex c)
+    (string-append 
+      (repr (real-part c))
+      "+"
+      (repr (imag-part c))
+      "i"))
+  (generics 'put 'repr '(complex) repr-complex)
+  ...
+  'done)
+
+(define (install-polynomial-package)
+  ...
+  (define (repr-term var term)
+    (string-append 
+      "[" (repr (coeff term)) "]" var "^" (number->string (order term))))
+  (define (repr-termlist var terms)
+    (cond ((empty-termlist? terms) 
+           (string-append "[0]" var "^0"))
+          ((empty-termlist? (rest-terms terms))
+           (repr-term var (first-term terms)))
+          (else
+            (string-append 
+              (repr-termlist var (rest-terms terms))
+              " + "
+              (repr-term var (first-term terms))))))
+  (define (repr-poly p)
+    (let ((var (symbol->string (variable p)))
+          (terms (term-list p)))
+      (repr-termlist var terms))) 
+  (generics 'put 'repr '(polynomial) repr-poly)
 ```
+
+Теперь например можно получать полиномчики:
+```
+> (define p1
+    (make-polynomial 
+      'x
+      `((1 ,(make-rational 1 3))
+        (2 ,(make-integer 1)))))
+> (repr p1)
+"[1]x^2 + [1/3]x^1"
+```
+
+## 2.87
+
 
