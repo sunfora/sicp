@@ -1534,3 +1534,145 @@ wow!
 > (=zero? (add p1 p2))
 #t
 ```
+
+## 2.88
+
+Да, одна из проблем которая возникает при реализации вычитания — у нас может не быть того самого второго терма, чтобы его вычесть.
+Поэтому нам надо как-то уметь отрицать термы. Но в таком случае можно упростить происходящее до негации полинома и суммы термов.
+
+Короче давайте заведем negate для всех чисел и полиномов:
+
+- в пакете **integer**:
+  ```racket
+  (generics 'put 'negate '(integer)
+         (lambda (x) (tag (- x))))
+  ```
+
+- в пакете **rational**:
+  ```racket
+  (define (negate x)
+    (make-rat (- (numer x))
+              (denom x)))
+  (generics 'put 'negate '(rational) 
+       (lambda (x) (tag (negate x))))
+  ```
+
+- в пакете **real**:
+  ``racket
+  (generics 'put 'negate '(real)
+         (lambda (x) (tag (- x))))
+  ```
+
+- в пакете **rectangular**:
+  ```racket
+  (define (negate-rectangular z)
+    (make-from-real-imag (negate (real-part z))
+                         (negate (imag-part z))))
+  (generics 'put 'negate '(rectangular)
+       (lambda (x) (tag (negate-rectangular x))))
+  ```
+
+- в пакете **polar**:
+  ```racket
+  (define (negate-polar x)
+    (make-from-mag-ang
+      (negate (magnitude x))
+      (angle x)))
+  (generics 'put 'negate '(polar)
+       (lambda (x) (tag (negate-polar x))))
+  ```
+
+- в пакете **complex**:
+  ```racket
+  (generics 'put 'negate '(complex) 
+       (lambda (z) (tag (negate z))))
+  ```
+
+- в пакете **polynomial**:
+  ```racket
+  (define (negate-termlist t)
+    (if (empty-termlist? t)
+      t
+      (let* ((head (first-term t))
+             (rest (rest-terms t))
+             (ord (order head))
+             (coe (coeff head)))
+        (adjoin-term (make-term ord (negate coe))
+                     (negate-termlist rest)))))
+  (define (negate-poly p)
+    (let ((v (variable p))
+          (t (term-list p)))
+      (make-poly v (negate-termlist t))))
+  (generics 'put 'negate '(polynomial)
+       (lambda (p) (tag (negate-poly p))))
+  ```
+
+И проверим что работает:
+```
+> (define p1
+    (make-polynomial 
+      'x `((1 ,(make-integer 1))
+        (2 ,(make-rational 1 3))
+        (3 ,(make-real 2.71828))
+        (4 ,(make-complex-from-mag-ang (make-integer 1) 
+                                       (make-integer 2)))
+        (5 ,(make-complex (make-integer 1)
+                          (make-integer 2)))
+        (6 ,(make-polynomial 'y
+                             `((0 ,(make-integer 1))
+                               (1 ,(make-integer 2))))))))
+
+> (define p2
+    (negate p1))
+
+> (display (repr p1)) (newline)
+[[2]y^1 + [1]y^0]x^6 + [1+2i]x^5 + [-0.4161468365471424+0.9092974268256817i]x^4 + [2.71828]x^3 + [1/3]x^2 + [1]x^1
+> (display (repr p2)) (newline)
+[[-2]y^1 + [-1]y^0]x^6 + [-1+-2i]x^5 + [0.4161468365471424+-0.9092974268256817i]x^4 + [-2.71828]x^3 + [-1/3]x^2 + [-1]x^1
+> (=zero? (add p1 p2)) 
+#t
+> (display (repr (negate (make-polynomial 'x '())))) (newline)
+[0]x^0
+```
+
+Ну а теперь давайте сделаем sub для полиномов:
+
+```racket
+(define (sub-poly p1 p2)
+  (if (same-variable? (variable p1)
+                      (variable p2))
+    (make-poly (variable p1)
+               (add-terms (term-list p1)
+                          (negate-termlist (term-list p2))))
+    (error 'polynomial-package/sub
+           "cannot sub polynomials, not in the same var ~a ~a"
+           p1 p2)))
+
+(generics 'put 'sub '(polynomial polynomial)
+     (lambda (x y) (tag (sub-poly x y))))
+```
+
+```
+> (define p1
+    (make-polynomial 
+      'x
+      `((1 ,(make-integer 1))
+        (6 ,(make-polynomial 'y
+                             `((0 ,(make-integer 1))
+                               (1 ,(make-integer 2))))))))
+> (define p2
+    (make-polynomial 
+      'x
+      `((1 ,(make-integer 4))
+        (4 ,(make-polynomial 'y
+                             `((1 ,(make-rational 1 2)))))
+        (6 ,(make-polynomial 'y
+                             `((0 ,(make-integer 1))
+                               (1 ,(make-integer 2))))))))
+> (display (repr p1)) (newline)
+[[2]y^1 + [1]y^0]x^6 + [1]x^1
+> (display (repr p2)) (newline)
+[[2]y^1 + [1]y^0]x^6 + [[1/2]y^1]x^4 + [4]x^1
+> (display (repr (sub p1 p2))) (newline)
+[[-1/2]y^1]x^4 + [-3]x^1
+```
