@@ -1367,7 +1367,7 @@ wow!
      (define (eq-complex? z1 z2)
        (and (equ? (real-part z1) (real-part z2))
             (equ? (imag-part z1) (imag-part z2))))
-     (define (=zero? z1)
+     (define (complex=zero? z1)
        (=zero? (magnitude z1)))
 
      ;; interface to rest of the system
@@ -1385,7 +1385,7 @@ wow!
           (lambda (z1 z2) 
             (tag (div-complex z1 z2))))
      (generics 'put 'equ? '(complex complex) eq-complex?)
-     (generics 'put '=zero? '(complex) =zero?)
+     (generics 'put '=zero? '(complex) complex=zero?)
      (generics 'put 'make-from-real-imag 'complex
           (lambda (x y) 
             (tag (make-from-real-imag x y))))
@@ -1420,5 +1420,9 @@ wow!
 > (add (make-complex (make-integer 1) (make-integer 2))
        (make-complex (make-real 1) (make-rational -2 1)))
 (integer . 2)
+> (=zero? (make-complex (make-integer 0) (make-real 0)))
+#t
+```
+
 ```
 
