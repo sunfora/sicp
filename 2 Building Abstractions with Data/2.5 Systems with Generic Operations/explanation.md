@@ -1676,3 +1676,558 @@ wow!
 > (display (repr (sub p1 p2))) (newline)
 [[-1/2]y^1]x^4 + [-3]x^1
 ```
+
+## 2.89
+
+Окей, прежде чем мы приступим к этой проблеме, я бы хотел подметить одну проблему: мы не умеем числа умножать на полиномы. Более того, мы не можем засунуть полином в башню типов, потому что не очевидно, до полинома по какой переменной мы будем поднимать наше число. И что это вообще значит? 
+
+Почему я поднимаю эту проблему? Потому что при реализации dense полиномов у нас возникнет необходимость вставлять нули в термы. И к сожалению не ясно нули какого типа. Хотелось бы например просто нули.
+
+В общем я не хочу, то, что называется загрязнять нашу систему, поэтому я предлагаю сделать большую переделку. Давайте у нас все числа, все операции над числами будут жить немножко отдельно от полиномов. Иначе говоря мы дадим числам собственный apply-generic, собственное всё. У нас будет просто тип number и будет просто тип polynomial, а так же мы вернем scheme-number.
+
+В общем мы возьмём весь существующий код и закроем его в отдельный модуль чисел как таковых. Чтобы потом поверх этого сделать новую generic систему, которая с полиномами не пересекается.
+
+Первое изменение которое мы сделаем это проведем локализацию таблиц:
+
+Раньше например установка пакета выглядела вот так:
+```racket
+(define (install-integer-package)
+  ...
+  'done)
+(install-integer-package)
+```
+
+И мы как бы дёргали имплицитно generics. Давайте теперь сделаем generics явным параметром.
+
+```racket
+(define (install-integer-package generics)
+  ...
+  'done)
+(install-integer-package generics)
+```
+
+Теперь у нас есть возможность перенаправлять куда ползут вызовы. Проделаем это для каждой таблицы (полиномы временно удалим, чтобы не мешались). Получится что-то вот такое:
+
+```racket
+(install-integer-package generics)
+(install-rational-package generics)
+(install-real-package generics)
+(install-rectangular-package generics)
+(install-polar-package generics)
+(install-complex-package generics)
+(install-numerical-tower-package generics coercion tower)
+```
+
+Давайте проверим, что ничего не сломалось.
+
+```
+> (add (make-complex (make-integer 1) (make-integer -1)) 
+       (make-complex (make-integer -1) (make-integer 1)))
+(integer . 0)
+```
+
+So far so good. Теперь возьмём и всё засунем в пакет number
+```racket
+(define (install-number-package export-generics export-tag)
+  (define (setup-type-tower)
+    ;; код setup-type-tower
+    ...)
+
+  (let ((generics (setup-table 'generics))
+        (coercion (setup-table 'coercion))
+        (tower (setup-type-tower)))
+
+    ;; абсолютно весь старый код (кроме setup-table)
+    ...
+
+    ;; installed packages
+    (install-integer-package generics)
+    (install-rational-package generics)
+    (install-real-package generics)
+    (install-rectangular-package generics)
+    (install-polar-package generics)
+    (install-complex-package generics)
+    (install-numerical-tower-package generics coercion tower)
+
+    ;; operations
+    (export-generics 'put 'add '(number number)
+           (lambda (x y)
+             (export-tag 'number (add x y))))
+    (export-generics 'put 'sub '(number number)
+           (lambda (x y)
+             (export-tag 'number (sub x y))))
+    (export-generics 'put 'mul '(number number)
+           (lambda (x y)
+             (export-tag 'number (mul x y))))
+    (export-generics 'put 'div '(number number)
+           (lambda (x y)
+             (export-tag 'number (div x y))))
+    (export-generics 'put 'equ? '(number number)
+           (lambda (x y)
+             (equ? x y)))
+    (export-generics 'put 'arctan '(number number)
+           (lambda (x y)
+             (export-tag 'number (arctan x y))))
+    (export-generics 'put 'repr '(number)
+           (lambda (x)
+             (repr x)))
+    (export-generics 'put 'negate '(number)
+           (lambda (x)
+             (export-tag 'number (negate x))))
+    (export-generics 'put '=zero? '(number)
+           (lambda (x)
+             (=zero? x)))
+    (export-generics 'put 'square-root '(number)
+           (lambda (x)
+             (export-tag 'number (square-root x))))
+    (export-generics 'put 'sine '(number)
+           (lambda (x)
+             (export-tag 'number (sine x))))
+    (export-generics 'put 'cosine '(number)
+           (lambda (x)
+             (export-tag 'number (cosine x))))
+    (export-generics 'put 'numer '(number)
+           (lambda (x)
+             (numer x)))
+    (export-generics 'put 'denom '(number)
+           (lambda (x)
+             (denom x)))
+    (export-generics 'put 'real-part '(number)
+           (lambda (x)
+             (export-tag 'number (real-part x))))
+    (export-generics 'put 'imag-part '(number)
+           (lambda (x)
+             (export-tag 'number (imag-part x))))
+    (export-generics 'put 'magnitude '(number)
+           (lambda (x)
+             (export-tag 'number (magnitude x))))
+    (export-generics 'put 'angle '(number)
+           (lambda (x)
+             (export-tag 'number (angle x))))
+
+    ;; constructors 
+    (export-generics 'put 'make-integer 'number
+           (lambda (x)
+             (export-tag 'number (make-integer x))))
+    (export-generics 'put 'make-rational 'number
+           (lambda (x y)
+             (export-tag 'number (make-rational x y))))
+    (export-generics 'put 'make-real 'number
+           (lambda (x)
+             (export-tag 'number (make-real x))))
+    (export-generics 'put 'make-complex-from-real-imag 'number
+           (lambda (x y)
+             (export-tag 'number (make-complex-from-real-imag x y))))
+    (export-generics 'put 'make-complex-from-mag-ang 'number
+           (lambda (x y)
+             (export-tag 'number (make-complex-from-mag-ang x y))))
+    (export-generics 'put 'make-complex 'number
+           (lambda (x y)
+             (export-tag 'number (make-complex-from-real-imag x y)))))
+  'done)
+```
+
+Теперь нам надо сделать подвязки в пакете сверху.
+
+```racket
+(define generics (setup-table 'generics))
+
+  (define (tagged? datum)
+    (and (pair? datum)
+         (symbol? (car datum))))
+
+  (define (attach-tag type-tag contents)
+    (cons type-tag contents))
+          
+  (define (type-tag datum)
+    (cond ((pair? datum)
+           (car datum))
+          (else 
+           (error 'type-tag 
+                  "bad tagged datum ~a" datum))))
+      
+  (define (contents datum)
+    (cond ((pair? datum) 
+           (cdr datum))
+          (else 
+           (error 'contents 
+                  "bad tagged datum ~a" datum))))
+
+  (define (apply-generic op . args)
+    (define (tags args)
+      (map type-tag args))
+    (define (method-not-found)
+      (error 'apply-generic
+             "method not found ~a ~a"
+             op (tags args)))
+    (define (search args)
+      (generics 'get op (tags args)))
+    (define (has? args) 
+      (generics 'has? op (tags args)))
+    (define (apply-strip args)
+      (apply (search args) (map contents args)))
+    (cond ((has? args)
+           (apply-strip args))
+          (else 
+            (method-not-found))))
+
+(define (repr x) (apply-generic 'repr x))
+(define (negate x) (apply-generic 'negate x))
+(define (add x y) (apply-generic 'add x y))
+(define (sub x y) (apply-generic 'sub x y))
+(define (mul x y) (apply-generic 'mul x y))
+(define (div x y) (apply-generic 'div x y))
+(define (equ? x y) (apply-generic 'equ? x y))
+(define (=zero? x) (apply-generic '=zero? x))
+(define (square-root x) (apply-generic 'square-root x))
+(define (sine x) (apply-generic 'sine x))
+(define (cosine x) (apply-generic 'cosine x))
+(define (arctan x y) (apply-generic 'arctan x y))
+(define (numer rat) (apply-generic 'numer rat))
+(define (denom rat) (apply-generic 'denom rat))
+(define (real-part z) (apply-generic 'real-part z))
+(define (imag-part z) (apply-generic 'imag-part z))
+(define (magnitude z) (apply-generic 'magnitude z))
+(define (angle z) (apply-generic 'angle z))
+
+(define (make-integer n)
+  ((generics 'get 'make-integer 'number) n))
+(define (make-rational n d)
+  ((generics 'get 'make-rational 'number) n d))
+(define (make-real n)
+  ((generics 'get 'make-real 'number) n))
+
+(define (make-complex-from-real-imag x y)
+  ((generics 'get 'make-complex-from-real-imag 'number) (contents x) 
+                                                        (contents y)))
+(define (make-complex-from-mag-ang r a)
+  ((generics 'get 'make-complex-from-mag-ang 'number) (contents r) 
+                                                      (contents a)))
+(define (make-complex x y)
+  ((generics 'get 'make-complex 'number) (contents x) 
+                                         (contents y)))
+
+(define (intstall-number-package export-generics export-tag) ...)
+
+(install-number-package generics attach-tag)
+```
+
+Кроме конструкторов, для которых пришлось поменять типы и пробросить контент, это практически копипаста.
+Зато что мы получили? Теперь упростился apply-generic до своего стартового состояния, когда он не умел в coercion. И это замечательно, потому что теперь мы можем не думать что происходит в пакете number: там может происходить что угодно.
+
+Давайте попробуем результаты наших трудов:
+```
+> (make-integer 1)
+(number integer . 1)
+> (add (make-integer 1) (make-integer 2))
+(number integer . 3)
+> (add (make-complex (make-integer 1) (make-integer 2))
+       (make-complex (make-integer 1) (make-integer 2)))
+(number complex rectangular (integer . 2) integer . 4)
+> (mul (make-complex (make-integer 1) (make-integer 2))
+       (make-complex (make-integer 1) (make-integer 2)))
+(number complex polar (real . 5.000000000000001) real . 2.214297435588181)
+> (cosine (make-real 1/3))
+(number real . 0.9449569463147377)
+> (display 
+    (repr 
+      (mul (make-complex (make-integer 1) (make-integer 2))
+           (make-complex (make-integer 1) (make-integer 2))))) (newline)
+-3+4.000000000000002i
+> (=zero? (sub (make-integer 2) (make-rational 2 1)))
+#t
+> (equ? (make-integer 1) (make-complex (make-integer 1) (make-integer 0)))
+#t
+> (denom (make-integer 1))
+(number . 1)
+```
+
+Ну в общем похоже на правду. Я тут напоролся на кучу ошибок, потому что копипаста немного зло, ну да ладно. Вы из не видите, потому что я их уже решил. Но может есть еще какие-то баги. Пора наверное заводить какие-то тесты... 
+
+Но я пока всё еще не буду, несмотря на то, что программа уже стала довольно жирной.
+
+Единственное, что мне выше не нравится, это то, что ```denom``` и ```numer``` возвращают не ```(number integer . 1)```. Это немножко наверное не ожидаемое поведение. Потому что мы наверняка ожидаем всё таки что-то такое.
+
+Ну это исправляется исправлением пакета ```rational``` и ```coercion``` между ```integer->rational```, ```rational->integer```:
+
+- в пакете **rational**:
+  ```racket
+  (generics 'put 'make 'rational
+    (lambda (n d)
+      (if (or (not (eq? (type-tag n) 'integer))
+              (not (eq? (type-tag d) 'integer)))
+          (error 'rational-package/make
+                 "cannot create rational not from integers")
+          (let ((n (integer->scheme-number n))
+                (d (integer->scheme-number d)))
+            (tag (make-rat n d))))))
+  (generics 'put 'numer '(rational) 
+            (lambda (x) 
+              (make-integer (numer x))))
+  (generics 'put 'denom '(rational) 
+            (lambda (x) 
+              (make-integer (denom x))))
+  ```
+
+- в пакете **numerical-tower**:
+  ```racket
+  (define (integer->rational i)
+    (make-rational i
+                   (make-integer 1)))
+  (define (rational->real r)
+    (make-real (/ (integer->scheme-number (numer r)) 
+                  (integer->scheme-number (denom r)))))
+  (define (rational->integer r)
+    (numer r))
+  (define (real->rational r)
+    (let ((r (contents r)))
+      (cond ((eqv? +inf.0 r)
+             (make-rational (make-integer (expt 2 1024))
+                            (make-integer 1)))
+            ((eqv? -inf.0 r)
+             (make-rational (make-integer (expt -2 1024))
+                            (make-integer 1)))
+            ((eqv? +nan.0 r)
+             (make-rational (make-integer 0) 
+                            (make-integer 1)))
+            ((and (exact? r)
+                  (rational? r))
+             (make-rational 
+               (make-integer (numerator r))
+               (make-integer (denominator r))))
+            (else 
+             (let ((r (rationalize
+                        (inexact->exact r)
+                        1/10000)))
+               (make-rational
+                 (make-integer (numerator r))
+                 (make-integer (denominator r))))))))
+  ```
+
+Наконец, нам надо предоставить integer->scheme-number, мы сделаем его так (внутри пакета **number**):
+```racket
+(define (integer->scheme-number i)
+  (contents i))
+```
+
+И давайте перепишем конструкторы, как по мне они должны стать обычными методами вроде:
+```racket
+;; constructors 
+(export-generics 'put 'make-integer '(scheme-number)
+       (lambda (x)
+         (export-tag 'number (make-integer x))))
+(export-generics 'put 'make-rational '(number number)
+       (lambda (x y)
+         (export-tag 'number (make-rational x y))))
+(export-generics 'put 'make-real '(scheme-number)
+       (lambda (x)
+         (export-tag 'number (make-real x))))
+(export-generics 'put 'make-complex-from-real-imag '(number number)
+       (lambda (x y)
+         (export-tag 'number (make-complex-from-real-imag x y))))
+(export-generics 'put 'make-complex-from-mag-ang '(number number)
+       (lambda (x y)
+         (export-tag 'number (make-complex-from-mag-ang x y))))
+(export-generics 'put 'make-complex '(number number)
+       (lambda (x y)
+         (export-tag 'number (make-complex-from-real-imag x y)))))
+```
+
+И обвязки:
+```racket
+(define (make-integer n) (apply-generic 'make-integer n))
+(define (make-rational n d) (apply-generic 'make-rational n d))
+(define (make-real n) (apply-generic 'make-real n))
+
+(define (make-complex-from-real-imag x y) 
+  (apply-generic 'make-complex-from-real-imag x y))
+(define (make-complex-from-mag-ang r a)
+  (apply-generic 'make-complex-from-mag-ang r a))
+(define (make-complex x y)
+  (apply-generic 'make-complex x y))
+```
+
+Единственная проблема: нам нужен scheme-number!
+Давайте его наконец вернем. И может быть как и раньше сделаем его прозрачным.
+
+```racket
+(define (make-scheme-number x)
+  ((generics 'get 'make 'scheme-number) x))
+
+(define (install-scheme-number-package generics export-tag)
+    (define (tag x)
+      (export-tag 'scheme-number x))
+    (define (make x)
+      (if (not (number? x))
+        (error 'scheme-number-package/make
+               "expected number but got ~a"
+               x))
+        (tag x))
+    (generics 'put 'add '(scheme-number scheme-number)
+         (lambda (x y) (tag (+ x y))))
+    (generics 'put 'sub '(scheme-number scheme-number)
+         (lambda (x y) (tag (- x y))))
+    (generics 'put 'mul '(scheme-number scheme-number)
+         (lambda (x y) (tag (* x y))))
+    (generics 'put 'div '(scheme-number scheme-number)
+         (lambda (x y) (tag (/ x y))))
+    (generics 'put 'negate '(scheme-number)
+         (lambda (x) (tag (- x))))
+    (generics 'put 'sine '(scheme-number) 
+         (lambda (x) (tag (sin x))))
+    (generics 'put 'cosine '(scheme-number)
+         (lambda (x) (tag (cos x))))
+    (generics 'put 'arctan '(scheme-number scheme-number) 
+         (lambda (x y) (tag (atan x y))))
+    (generics 'put 'square-root '(scheme-number)
+         (lambda (x) (tag (sqrt x))))
+
+    (generics 'put 'equ? '(scheme-number scheme-number) =)
+    (generics 'put 'repr '(scheme-number) number->string)
+    (generics 'put '=zero? '(scheme-number)
+         (lambda (x) (= x 0)))
+    (generics 'put 'make 'scheme-number make)
+    'done)
+
+(install-scheme-number-package generics attach-tag)
+```
+
+Давайте опробуем работу:
+```
+> (add (make-integer (make-scheme-number 1))
+       (make-real (make-scheme-number 2.4643)))
+(number real . 3.4643)
+```
+
+Давайте теперь вернем старые добрые приколы в стиле того, что scheme-number нашей системой распознается автоматически: нам не надо вызывать конструктор.
+
+```racket
+(define (tagged? datum)
+  (or (number? datum)
+      (and (pair? datum)
+           (symbol? (car datum)))))
+
+(define (attach-tag type-tag contents)
+  (cond ((and (eq? type-tag 'scheme-number)
+              (number? contents))
+         contents)
+        ((and (eq? type-tag 'scheme-number)
+              (not (number? contents)))
+         (error 'attach-tag
+                "trying to attach scheme-number tag to ~a"
+                contents))
+        (else 
+          (cons type-tag contents))))
+        
+(define (type-tag datum)
+  (cond ((number? datum)
+         'scheme-number)
+        ((pair? datum)
+         (car datum))
+        (else 
+         (error 'type-tag 
+                "bad tagged datum ~a" datum))))
+    
+(define (contents datum)
+  (cond ((number? datum)
+         datum)
+        ((pair? datum) 
+         (cdr datum))
+        (else 
+         (error 'contents 
+                "bad tagged datum ~a" datum))))
+```
+
+И всё замечательно теперь работает:
+```
+> (make-integer 1)
+(number integer . 1)
+> (div (make-integer 1) (make-integer 2)) 
+(number rational 1 . 2)
+> (add (make-integer 1) (make-complex (make-real 1/2) (make-real 0)))
+(number rational 3 . 2)
+> (make-rational (make-integer 1) (make-real 1/2))
+rational-package/make: cannot create rational not from integers [,bt for context]
+> (repr (make-rational (make-integer 1) (make-integer 1)))
+"1/1"
+```
+
+Возможно стоит еще добавить вещь которую я в прошлый раз не додумался добавить: перед тем как делать raise, хорошо бы сделать всем аргументам, которые того заслуживают: drop. Давайте добавим это поведение.
+
+```racket
+(define (apply-generic op . args)
+  ...
+  (define (drop-if-can arg)
+    (if (and (pair? arg)
+             (tower 'in (type-tag arg)))
+      (drop arg)
+      arg))
+
+  (define (raise-loop args)
+    (cond ((can-be-raised? args)
+           (raise-loop (raise-all args)))
+          (else
+            (method-not-found))))
+
+  (define (apply-loop args)
+    (if (has? args)
+      (apply-strip args)
+      (let ((dropped (map drop-if-can args)))
+        (raise-loop dropped))))
+  
+  (drop-if-can (apply-loop (map drop-if-can args))))
+```
+
+И надо правда немного переписать дроп, вот с этого:
+```racket
+(define (drop obj)
+  (if (tower 'prev (type-tag obj))
+    (let ((result (project obj)))
+      (if (equ? result obj)
+        (drop result) 
+        obj))
+    obj))
+```
+
+На тот который не циклится:
+```racket
+(define (drop obj)
+  (if (tower 'prev (type-tag obj))
+    (let ((result (project obj)))
+      (if (equ? (raise result) obj)
+        (drop result) 
+        obj))
+    obj))
+```
+
+Проблема в том что equ? — это generic операция, и она у нас пойдёт сравниваться. Не найдёт себя, пойдёт дропнет аргументы. А раз мы её вызвали из дропа, то мы снова пойдём в ```equ?```, мы снова попытаемся их дропнуть. И т.д. Короче бесконечный цикл.
+
+Для пущей безопасности надо вообще убрать всю эту чушь и вызвать equ от соответствующего типа напрямую, а не через наши цыганские фокусы. Но постольку поскольку ```equ?``` определен для каждого числа из башни, и постольку поскольку трансформеры ```a->b``` корректны, например ```integer->rational``` действительно переводит целые в рациональные — мы более менее в безопасности.
+
+Если честно мне конечно то что мы накуролесили не нравится, потому что система очень хрупкая на самом деле.
+Возможно надо как-то всё переписать, добавив всякие дополнительные штуки типа ```safe-numer```, который только рациональные числа ожидает, аналогично ```safe-equ?``` и прочие селекторы. Чтобы они не вздумали ничего ни дропать, ни поднимать.
+
+Но я этого делать не буду, потому что всё и так разбор крайне затягивается.
+
+
+Короче, ладно, хорошие новости: теперь у нас например работает ```numer``` и ```denom``` на изначально не рациональных числах!
+
+```racket
+> (denom (make-rational (make-integer 1) (make-integer 2)))
+(number integer . 2)
+> (denom (make-real 1/2))
+(number integer . 2)
+> (denom (make-complex (make-real 1/2) (make-integer 0)))
+(number integer . 2)
+> (denom (make-complex (make-real 1/2) (make-integer 1)))
+apply-generic: method not found denom (complex) [,bt for context]
+> (cosine (make-complex (make-real 1/2) (make-integer 0)))
+(number real . 0.8775825618903728)
+> (cosine (make-complex (make-real 1/2) (make-integer 1)))
+apply-generic: method not found cosine (complex) [,bt for context]
+```
+
+И на этом наверное со всеми этими бесконечными числами покончено: они теперь живут в своей реальности, и нам не мешают.
+Теперь мы можем полностью новые правила вводить, строить новые башни, третируя числа как просто навсего некий обобщённый типа ```number```.
+
+
