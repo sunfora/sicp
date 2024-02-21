@@ -32,7 +32,7 @@
       false))
 
   (define (has? key-1 key-2)
-    (if (generics 'get key-1 key-2)
+    (if (get key-1 key-2)
       true
       false))
 
