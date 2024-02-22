@@ -3,7 +3,6 @@
                  make-hash
                  hash-set!
                  hash-ref))
-
 (define (setup-table . name-list)
   (define name
     (cond 
@@ -51,94 +50,9 @@
                      name)))
       args)))
 
-(define generics (setup-table 'generics))
-
-(define (tagged? datum)
-  (or (number? datum)
-      (and (pair? datum)
-           (symbol? (car datum)))))
-
-(define (attach-tag type-tag contents)
-  (cond ((and (eq? type-tag 'scheme-number)
-              (number? contents))
-         contents)
-        ((and (eq? type-tag 'scheme-number)
-              (not (number? contents)))
-         (error 'attach-tag
-                "trying to attach scheme-number tag to ~a"
-                contents))
-        (else 
-          (cons type-tag contents))))
-        
-(define (type-tag datum)
-  (cond ((number? datum)
-         'scheme-number)
-        ((pair? datum)
-         (car datum))
-        (else 
-         (error 'type-tag 
-                "bad tagged datum ~a" datum))))
-    
-(define (contents datum)
-  (cond ((number? datum)
-         datum)
-        ((pair? datum) 
-         (cdr datum))
-        (else 
-         (error 'contents 
-                "bad tagged datum ~a" datum))))
-
-(define (apply-generic op . args)
-  (define (tags args)
-    (map type-tag args))
-  (define (method-not-found)
-    (error 'apply-generic
-           "method not found ~a ~a"
-           op (tags args)))
-  (define (search args)
-    (generics 'get op (tags args)))
-  (define (has? args) 
-    (generics 'has? op (tags args)))
-  (define (apply-strip args)
-    (apply (search args) (map contents args)))
-  (cond ((has? args)
-         (apply-strip args))
-        (else 
-          (method-not-found))))
-
-(define (repr x) (apply-generic 'repr x))
-(define (negate x) (apply-generic 'negate x))
-(define (add x y) (apply-generic 'add x y))
-(define (sub x y) (apply-generic 'sub x y))
-(define (mul x y) (apply-generic 'mul x y))
-(define (div x y) (apply-generic 'div x y))
-(define (equ? x y) (apply-generic 'equ? x y))
-(define (=zero? x) (apply-generic '=zero? x))
-(define (square-root x) (apply-generic 'square-root x))
-(define (sine x) (apply-generic 'sine x))
-(define (cosine x) (apply-generic 'cosine x))
-(define (arctan x y) (apply-generic 'arctan x y))
-(define (numer rat) (apply-generic 'numer rat))
-(define (denom rat) (apply-generic 'denom rat))
-(define (real-part z) (apply-generic 'real-part z))
-(define (imag-part z) (apply-generic 'imag-part z))
-(define (magnitude z) (apply-generic 'magnitude z))
-(define (angle z) (apply-generic 'angle z))
-
-(define (make-integer n) (apply-generic 'make-integer n))
-(define (make-rational n d) (apply-generic 'make-rational n d))
-(define (make-real n) (apply-generic 'make-real n))
-
-(define (make-complex-from-real-imag x y) 
-  (apply-generic 'make-complex-from-real-imag x y))
-(define (make-complex-from-mag-ang r a)
-  (apply-generic 'make-complex-from-mag-ang r a))
-(define (make-complex x y)
-  (apply-generic 'make-complex x y))
-
-(define (make-scheme-number x)
-  ((generics 'get 'make 'scheme-number) x))
-
+;; ======================================================
+;; number package
+;; ======================================================
 (define (install-number-package export-generics export-tag)
   (define (setup-type-tower)
     (define tower (setup-table 'tower))
@@ -886,6 +800,9 @@
              (export-tag 'number (make-complex-from-real-imag x y)))))
 'done)
 
+;; ======================================================
+;; scheme-number package
+;; ======================================================
 (define (install-scheme-number-package generics export-tag)
     (define (tag x)
       (export-tag 'scheme-number x))
@@ -895,6 +812,12 @@
                "expected number but got ~a"
                x))
         (tag x))
+
+    (define real-part 
+      (eval 'real-part (scheme-report-environment 5)))
+    (define imag-part 
+      (eval 'imag-part (scheme-report-environment 5))) 
+
     (generics 'put 'add '(scheme-number scheme-number)
          (lambda (x y) (tag (+ x y))))
     (generics 'put 'sub '(scheme-number scheme-number)
@@ -913,7 +836,14 @@
          (lambda (x y) (tag (atan x y))))
     (generics 'put 'square-root '(scheme-number)
          (lambda (x) (tag (sqrt x))))
-
+    (generics 'put 'real-part '(scheme-number)
+         (lambda (x) (tag (real-part x))))
+    (generics 'put 'imag-part '(scheme-number)
+         (lambda (x) (tag (imag-part x))))
+    (generics 'put 'numer '(scheme-number)
+         (lambda (x) (tag (numerator x))))
+    (generics 'put 'denom '(scheme-number)
+         (lambda (x) (tag (denominator x))))
     (generics 'put 'equ? '(scheme-number scheme-number) =)
     (generics 'put 'repr '(scheme-number) number->string)
     (generics 'put '=zero? '(scheme-number)
@@ -921,5 +851,361 @@
     (generics 'put 'make 'scheme-number make)
     'done)
 
-(install-number-package generics attach-tag)
+;; ======================================================
+;; polynomial package
+;; ======================================================
+(define (install-polynomial-package generics attach-tag)
+  ;; internal procedures
+  ;; representation of poly
+  (define (foldr start op seq)
+    (if (null? seq)
+      start 
+      (foldr (op start (car seq)) op (cdr seq))))
+
+  (define (make-poly variable term-list)
+    (let ((term-list (map (lambda (t) 
+                            (apply make-term t))
+                          term-list)))
+      (cons variable
+            (foldr (the-empty-termlist) 
+                   (lambda (term-list term)
+                     (adjoin-term term term-list))
+                   term-list))))
+
+  (define (variable p) (car p))
+  (define (term-list p) (cdr p))
+
+  (define (same-variable? x y)
+    (and (variable? x)
+         (variable? y)
+         (eq? x y)))
+  (define variable? symbol?)
+
+  ;; representation of terms and term lists
+  (define (adjoin-term term term-list)
+    (cond ((=zero? (coeff term)) 
+           term-list)
+          ((empty-termlist? term-list)
+           (cons term term-list))
+          ((order< term (first-term term-list)) 
+           (cons term term-list))
+          ((order> term (first-term term-list))
+           (cons (first-term term-list)
+                 (adjoin-term term (rest-terms term-list))))
+          ((order= term (first-term term-list))
+           (error 'adjoin-term
+                  "term with order ~a already exists"
+                  (order term)))))
+  (define (the-empty-termlist) '())
+  (define (first-term term-list) (car term-list))
+  (define (rest-terms term-list) (cdr term-list))
+  (define (empty-termlist? term-list) 
+    (null? term-list))
+  (define (make-term order coeff) 
+    (list order coeff))
+  (define (order term) (car term))
+  (define (coeff term) (cadr term))
+
+  ;; operations on polynomials
+  (define (add-poly p1 p2)
+    (if (same-variable? (variable p1)
+                        (variable p2))
+      (make-poly (variable p1)
+                 (add-terms (term-list p1)
+                            (term-list p2)))
+      (error 'polynomial-package/add
+             "cannot add polynomials, not in a same var ~a ~a"
+             p1 p2)))
+
+  (define (sub-poly p1 p2)
+    (if (same-variable? (variable p1)
+                        (variable p2))
+      (make-poly (variable p1)
+                 (add-terms (term-list p1)
+                            (negate-termlist (term-list p2))))
+      (error 'polynomial-package/sub
+             "cannot sub polynomials, not in the same var ~a ~a"
+             p1 p2)))
+
+  (define (mul-poly p1 p2)
+    (if (same-variable? (variable p1)
+                        (variable p2))
+      (make-poly (variable p1)
+                 (mul-terms (term-list p1)
+                            (term-list p2)))
+      (error 'polynomial-package/mul
+             "cannot mul polynomials, not in a same var ~a ~a"
+             p1 p2)))
+
+  (define (by key p?)
+    (lambda (term-1 term-2)
+      (p? (key term-1) (key term-2))))
+  (define (order< x y) ((by order <) x y))
+  (define (order<= x y) ((by order <=) x y))
+  (define (order> x y) ((by order >) x y))
+  (define (order>= x y) ((by order >=) x y))
+  (define (order= x y) ((by order =) x y))
+    
+  (define (add-terms terms-1 terms-2)
+    (define (op>=1 terms-1 terms-2)
+      (let ((term-1 (first-term terms-1))
+            (rest-1 (rest-terms terms-1))
+            (term-2 (first-term terms-2))
+            (rest-2 (rest-terms terms-2)))
+        (cond ((order< term-1 term-2)
+               (adjoin-term term-1
+                            (op rest-1 terms-2)))
+              ((order> term-1 term-2)
+               (adjoin-term term-2 
+                            (op terms-1 rest-2)))
+              ((order= term-1 term-2)
+               (adjoin-term (make-term
+                              (order term-1)
+                              (add (coeff term-1)
+                                 (coeff term-2)))
+                            (op rest-1 rest-2))))))
+
+    (define (op terms-1 terms-2)
+      (cond ((empty-termlist? terms-1)
+             terms-2)
+            ((empty-termlist? terms-2)
+             terms-1)
+            (else
+             (op>=1 terms-1 terms-2))))
+
+    (op terms-1 terms-2))
+    
+  (define (mul-term x terms)
+    (if (empty-termlist? terms)
+        terms 
+        (let ((y (first-term terms))
+              (rest (rest-terms terms)))
+          (adjoin-term
+           (make-term 
+            (+ (order x) (order y))
+            (mul (coeff x) (coeff y)))
+           (mul-term x rest)))))
+
+  (define (mul-terms terms-1 terms-2)
+    (cond ((empty-termlist? terms-1)
+            terms-1)
+          ((empty-termlist? terms-2)
+           terms-2)
+          (else 
+           (add-terms (mul-term (first-term terms-1)
+                                terms-2)
+                      (mul-terms (rest-terms terms-1)
+                                 terms-2)))))
+
+
+  (define (repr-term var term)
+    (string-append 
+      "[" (repr (coeff term)) "]" var "^" (number->string (order term))))
+
+  (define (repr-termlist var terms)
+    (cond ((empty-termlist? terms) 
+           (string-append "[0]" var "^0"))
+          ((empty-termlist? (rest-terms terms))
+           (repr-term var (first-term terms)))
+          (else
+            (string-append 
+              (repr-termlist var (rest-terms terms))
+              " + "
+              (repr-term var (first-term terms))))))
+
+
+  (define (repr-poly p)
+    (let ((var (symbol->string (variable p)))
+          (terms (term-list p)))
+      (repr-termlist var terms)))
+
+  (define (poly-zero? p)
+    (empty-termlist? (term-list p)))
+
+  (define (negate-termlist t)
+    (if (empty-termlist? t)
+      t
+      (let* ((head (first-term t))
+             (rest (rest-terms t))
+             (ord (order head))
+             (coe (coeff head)))
+        (adjoin-term (make-term ord (negate coe))
+                     (negate-termlist rest)))))
+
+  (define (negate-poly p)
+    (let ((v (variable p))
+          (t (term-list p)))
+      (make-poly v (negate-termlist t))))
+
+  ;; interface to rest of the system
+  (define (tag p) (attach-tag 'polynomial p))
+  (generics 'put 'add '(polynomial polynomial)
+       (lambda (p1 p2) 
+         (tag (add-poly p1 p2))))
+  (generics 'put 'mul '(polynomial polynomial)
+       (lambda (p1 p2) 
+         (tag (mul-poly p1 p2))))
+  (generics 'put 'negate '(polynomial)
+       (lambda (p) (tag (negate-poly p))))
+  (generics 'put 'variable '(polynomial)
+       (lambda (p) (variable p)))
+  (generics 'put 'sub '(polynomial polynomial)
+       (lambda (x y) (tag (sub-poly x y))))
+  (generics 'put '=zero? '(polynomial) poly-zero?)
+  (generics 'put 'repr '(polynomial) repr-poly)
+  (generics 'put 'make 'polynomial
+       (lambda (var terms) 
+         (tag (make-poly var terms))))
+  'done)
+
+;; ======================================================
+;; juggle package
+;; ======================================================
+(define (install-juggle-package juggle)
+  (juggle 'put 'juggle '(scheme-number number)
+    (lambda (a b)
+      (list (scheme-number->number a) b)))
+  (juggle 'put 'juggle '(number scheme-number)
+    (lambda (a b)
+      (list a (scheme-number->number b))))
+  (juggle 'put 'juggle '(polynomial scheme-number)
+    (lambda (a b)
+      (list a (scheme-number->polynomial (variable a) b))))
+  (juggle 'put 'juggle '(scheme-number polynomial)
+    (lambda (a b)
+      (list (scheme-number->polynomial (variable b) a) b)))
+  (juggle 'put 'juggle '(polynomial number)
+    (lambda (a b)
+      (list a (number->polynomial (variable a) b))))
+  (juggle 'put 'juggle '(number polynomial)
+    (lambda (a b)
+      (list (number->polynomial (variable b) a) b)))
+  'done)
+
+(define (tagged? datum)
+  (or (number? datum)
+      (and (pair? datum)
+           (symbol? (car datum)))))
+(define (attach-tag type-tag contents)
+  (cond ((and (eq? type-tag 'scheme-number)
+              (number? contents))
+         contents)
+        ((and (eq? type-tag 'scheme-number)
+              (not (number? contents)))
+         (error 'attach-tag
+                "trying to attach scheme-number tag to ~a"
+                contents))
+        (else 
+          (cons type-tag contents))))
+(define (type-tag datum)
+  (cond ((number? datum)
+         'scheme-number)
+        ((pair? datum)
+         (car datum))
+        (else 
+         (error 'type-tag 
+                "bad tagged datum ~a" datum))))
+(define (contents datum)
+  (cond ((number? datum)
+         datum)
+        ((pair? datum) 
+         (cdr datum))
+        (else 
+         (error 'contents 
+                "bad tagged datum ~a" datum))))
+(define (apply-generic op . args)
+  (define (tags args)
+    (map type-tag args))
+  (define (method-not-found)
+    (error 'apply-generic
+           "method not found ~a ~a"
+           op (tags args)))
+  (define (search args)
+    (generics 'get op (tags args)))
+  (define (has? args) 
+    (generics 'has? op (tags args)))
+  (define (apply-strip args)
+    (apply (search args) (map contents args)))
+  (if (has? args)
+      (apply-strip args)
+      (let ((juggled (apply juggle args)))
+        (if (and juggled
+                 (has? juggled))
+          (apply-strip juggled)
+          (method-not-found)))))
+
+
+;; =====================================================
+;; generics operations
+;; =====================================================
+(define (repr x) (apply-generic 'repr x))
+(define (negate x) (apply-generic 'negate x))
+(define (add x y) (apply-generic 'add x y))
+(define (sub x y) (apply-generic 'sub x y))
+(define (mul x y) (apply-generic 'mul x y))
+(define (div x y) (apply-generic 'div x y))
+(define (equ? x y) (apply-generic 'equ? x y))
+(define (=zero? x) (apply-generic '=zero? x))
+(define (square-root x) (apply-generic 'square-root x))
+(define (sine x) (apply-generic 'sine x))
+(define (cosine x) (apply-generic 'cosine x))
+(define (arctan x y) (apply-generic 'arctan x y))
+(define (numer rat) (apply-generic 'numer rat))
+(define (denom rat) (apply-generic 'denom rat))
+(define (real-part z) (apply-generic 'real-part z))
+(define (imag-part z) (apply-generic 'imag-part z))
+(define (magnitude z) (apply-generic 'magnitude z))
+(define (angle z) (apply-generic 'angle z))
+(define (variable p) (apply-generic 'variable p))
+;; =====================================================
+;; constructors
+;; =====================================================
+(define (make-integer n) (apply-generic 'make-integer n))
+(define (make-rational n d) (apply-generic 'make-rational n d))
+(define (make-real n) (apply-generic 'make-real n))
+(define (make-complex-from-real-imag x y) 
+  (apply-generic 'make-complex-from-real-imag x y))
+(define (make-complex-from-mag-ang r a)
+  (apply-generic 'make-complex-from-mag-ang r a))
+(define (make-complex x y)
+  (apply-generic 'make-complex x y))
+(define (make-scheme-number x)
+  ((generics 'get 'make 'scheme-number) x))
+(define (make-polynomial var terms)
+  ((generics 'get 'make 'polynomial) var terms))
+;; ======================================================
+;; converters
+;; ======================================================
+(define (scheme-number->number x)
+  (cond ((integer? x)
+         (make-integer x))
+        ((and (exact? x)
+              (rational? x))
+         (make-rational (make-integer (numer x))
+                        (make-integer (denom x))))
+        ((real? x)
+         (make-real x))
+        ((complex? x)
+         (make-complex (make-real (real-part x))
+                       (make-real (imag-part x))))))
+(define (scheme-number->polynomial var x)
+  (make-polynomial var `((0 ,x))))
+(define (number->polynomial var x)
+  (make-polynomial var `((0 ,x))))
+
+(define (juggle . args)
+  (define (tags args)
+    (map type-tag args))
+  (let ((proc (juggle-table 'get 'juggle (tags args))))
+    (if proc
+      (apply proc args)
+    false)))
+;; ======================================================
+;; installed
+;; ======================================================
+(define generics (setup-table 'generics))
 (install-scheme-number-package generics attach-tag)
+(install-number-package generics attach-tag)
+(install-polynomial-package generics attach-tag)
+(define juggle-table (setup-table 'juggle))
+(install-juggle-package juggle-table)

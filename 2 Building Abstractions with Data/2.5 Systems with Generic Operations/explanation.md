@@ -2230,4 +2230,252 @@ apply-generic: method not found cosine (complex) [,bt for context]
 И на этом наверное со всеми этими бесконечными числами покончено: они теперь живут в своей реальности, и нам не мешают.
 Теперь мы можем полностью новые правила вводить, строить новые башни, третируя числа как просто навсего некий обобщённый типа ```number```.
 
+Давайте теперь добавим coercion в нашу систему. 
+А конкретно будем приводить ```scheme-number->number```:
+
+Для этого нам надо будет добавить к пакету **scheme-number** соответствующие биндинги:
+```racket
+(define real-part 
+  (eval 'real-part (scheme-report-environment 5)))
+(define imag-part 
+  (eval 'imag-part (scheme-report-environment 5))) 
+
+(generics 'put 'real-part '(scheme-number)
+     (lambda (x) (tag (real-part x))))
+(generics 'put 'imag-part '(scheme-number)
+     (lambda (x) (tag (imag-part x))))
+(generics 'put 'numer '(scheme-number)
+     (lambda (x) (tag (numerator x))))
+(generics 'put 'denom '(scheme-number)
+     (lambda (x) (tag (denominator x))))
+```
+
+Это нам надо сделать потому что у нас к сожалению есть проблема в виде generic операций numer, denom, real-part, imag-part.
+
+Зато теперь можно сделать достаточно тривиальную конверсию:
+```racket
+(define (scheme-number->number x)
+  (cond ((integer? x)
+         (make-integer x))
+        ((and (exact? x)
+              (rational? x))
+         (make-rational (make-integer (numer x))
+                        (make-integer (denom x))))
+        ((real? x)
+         (make-real x))
+        ((complex? x)
+         (make-complex (make-real (real-part x))
+                       (make-real (imag-part x))))))
+```
+
+```
+> (scheme-number->number 1)
+(number integer . 1)
+> (scheme-number->number 1/2)
+(number rational 1 . 2)
+> (scheme-number->number 1.24)
+(number real . 1.24)
+> (scheme-number->number 1+2i)
+(number complex rectangular (real . 1) real . 2)
+```
+
+Давайте наконец вернем наши полиномы:
+```
+(define (install-polynomial-package generics attach-tag)
+  ...)
+(install-polynomial-package generics attach-tag)
+
+(define (scheme-number->polynomial var x)
+  (make-polynomial var `((0 ,x))))
+(define (number->polynomial var x)
+  (make-polynomial var `((0 ,x))))
+```
+
+И сделаем generic операцию ```juggle```, которая будет список аргументов определенным образом колдовать. Ну что-то в стиле: 
+```racket
+(define juggle-table (setup-table 'juggle))
+
+(define (juggle . args)
+  (define (tags args)
+    (map type-tag args))
+  (let ((proc (juggle-table 'get 'juggle (tags args))))
+    (if proc
+      (apply proc args)
+    false)))
+
+(define (install-juggle-package juggle)
+  (juggle 'put 'juggle '(scheme-number number)
+    (lambda (a b)
+      (list (scheme-number->number a) b)))
+  (juggle 'put 'juggle '(number scheme-number)
+    (lambda (a b)
+      (list a (scheme-number->number b))))
+  (juggle 'put 'juggle '(polynomial scheme-number)
+    (lambda (a b)
+      (list a (scheme-number->polynomial (variable a) b))))
+  (juggle 'put 'juggle '(scheme-number polynomial)
+    (lambda (a b)
+      (list (scheme-number->polynomial (variable b) a) b)))
+  (juggle 'put 'juggle '(polynomial number)
+    (lambda (a b)
+      (list a (number->polynomial (variable a) b))))
+  (juggle 'put 'juggle '(number polynomial)
+    (lambda (a b)
+      (list (number->polynomial (variable b) a) b)))
+  'done)
+```
+
+Ну чтобы всё работало, надо еще достать variable из полиномов (в принципе почему бы и нет)
+```racket
+(define (install-polynomial-package ...)
+  ...
+  (generics 'put 'variable '(polynomial)
+       (lambda (p) (variable p)))
+  ...)
+
+(define (variable p) (apply-generic 'variable p))
+```
+
+
+Короче говоря посмотрите и узрите:
+```
+> (juggle (make-polynomial 'x '((0 1) (1 2))) 1)
+((polynomial x (0 1) (1 2)) (polynomial x (0 1))) 
+> (juggle (make-polynomial 'y '((0 1) (1 2))) 1)
+((polynomial y (0 1) (1 2)) (polynomial y (0 1)))
+> (juggle 1 (make-complex (make-integer 1) (make-real 2)))
+((number integer . 1) (number complex rectangular (integer . 1) real . 2))
+> (juggle (make-polynomial 'x '((0 1) (1 2))) (make-integer 0))
+((polynomial x (0 1) (1 2)) (polynomial x (0 (number integer . 0))))
+```
+
+Давайте теперь добавим эти правила в ```apply-generic```:
+```racket
+(define (apply-generic op . args)
+  ...
+  (if (has? args)
+      (apply-strip args)
+      (let ((juggled (apply juggle args)))
+        (if (and juggled
+                 (has? juggled))
+          (apply-strip juggled)
+          (method-not-found)))))
+```
+
+И теперь у нас более менее работают (наконец-то!) всякие конверсии автоматически:
+```
+> (add (make-polynomial 'x '((0 1) (1 2))) (make-integer 0))
+(polynomial x (0 (number integer . 1)) (1 2))
+> (repr (add (make-polynomial 'x '((0 1) (1 2))) (make-integer 0)))
+"[2]x^1 + [1]x^0"
+> (repr (mul (make-polynomial 'x '((0 1) (1 2))) 0))
+"[0]x^0"
+> (repr (mul (make-polynomial 'y '((0 1) (1 2))) 0))
+"[0]y^0"
+> (define p1
+    (make-polynomial 
+      'x
+      `((1 ,(make-integer 1))
+        (6 ,(make-polynomial 'y
+                             `((0 ,(make-integer 1))
+                               (1 ,(make-integer 2))))))))
+> (define p2
+    (make-polynomial 
+      'x
+      `((1 ,(make-integer 4))
+        (4 ,(make-polynomial 'y
+                             `((1 ,(make-rational (make-integer 1) 
+                                                  (make-integer 2))))))
+        (6 ,(make-polynomial 'y
+                             `((0 ,(make-integer 1))
+                               (1 ,(make-integer 2))))))))
+> (repr p1)
+"[[2]y^1 + [1]y^0]x^6 + [1]x^1"
+> (repr p2)
+"[[2]y^1 + [1]y^0]x^6 + [[1/2]y^1]x^4 + [4]x^1"
+> (repr (mul p1 p2))
+"[[4]y^2 + [4]y^1 + [1]y^0]x^12 + [[1]y^2 + [1/2]y^1]x^10 + [[10]y^1 + [5]y^0]x^7 + [[1/2]y^1]x^5 + [4]x^2"
+```
+
+Теперь мы можем перейти непосредственно к заданию, которое нас просили. А просили нас следующее:
+> Define procedures that implement the term-list representation described above as appropriate for dense polynomials. 
+
+Мы попытаемся поменять polynomial package минимальным образом. Для начала изменить конструктор ```make-poly```:
+```racket
+(define (make-poly variable term-list)
+  (let ((term-list (map (lambda (t) 
+                          (apply make-term t))
+                        term-list)))
+    (cons variable
+          (foldr (the-empty-termlist) 
+                 (lambda (term-list term)
+                   (adjoin-term term term-list))
+                 term-list))))
+```
+
+Кратко, мы сделали так, что теперь репрезентация термов не зависит от конструктора. 
+Он просто сам берет и собирает.
+
+Давайте проверим что ничего не сломалось:
+```
+
+```
+> (define p2
+    (make-polynomial 
+      'x
+      `((6 ,(make-polynomial 'y
+                             `((0 ,(make-integer 1))
+                               (1 ,(make-integer 2)))))
+        (1 ,(make-integer 4))
+        (4 ,(make-polynomial 'y
+                             `((1 ,(make-rational (make-integer 1) 
+                                                  (make-integer 2)))))))))
+> (repr p2)
+"[4]x^1 + [[1/2]y^1]x^4 + [[1]y^0 + [2]y^1]x^6"
+```
+
+Давайте модифицируем старый adjoin-term, чтобы он игнорировал порядок.
+```racket
+(define (adjoin-term term term-list)
+  (cond ((=zero? (coeff term)) 
+         term-list)
+        ((empty-termlist? term-list)
+         (cons term term-list))
+        ((order< term (first-term term-list)) 
+         (cons term term-list))
+        ((order> term (first-term term-list))
+         (cons (first-term term-list)
+               (adjoin-term term (rest-terms term-list))))
+        ((order= term (first-term term-list))
+         (error 'adjoin-term
+                "term with order ~a already exists"
+                (order term)))))
+```
+
+Проверяем:
+```
+> (define p2
+    (make-polynomial 
+      'x
+      `((6 ,(make-polynomial 'y
+                             `((0 ,(make-integer 1))
+                               (1 ,(make-integer 2)))))
+        (1 ,(make-integer 4))
+        (4 ,(make-polynomial 'y
+                             `((1 ,(make-rational (make-integer 1) 
+                                                  (make-integer 2)))))))))
+> (repr p2)
+"[4]x^1 + [[1/2]y^1]x^4 + [[1]y^0 + [2]y^1]x^6"
+
+
+> (make-polynomial 'x '((0 1) (0 1)))
+adjoin-term: term with order 0 already exists [,bt for context]
+```
+
+Альтернативно конечно можно складывать термы. Но я боюсь это немножко плохая идея.
+Всё таки ajoin-term используется в первую очередь для модификации полиномов.
+
+Всё! Сохранимся на этой точке (потому что в будущем мы будем объединять обе версии полиномов).
+И перейдём к рассмотрению dense полиномов наконец.
+
 
