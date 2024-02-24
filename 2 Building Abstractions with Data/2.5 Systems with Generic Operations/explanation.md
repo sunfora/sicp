@@ -2475,6 +2475,22 @@ adjoin-term: term with order 0 already exists [,bt for context]
 Альтернативно конечно можно складывать термы. Но я боюсь это немножко плохая идея.
 Всё таки ajoin-term используется в первую очередь для модификации полиномов.
 
+И дополнительно поменяем ```repr-term```:
+```racket
+(define (repr-termlist var terms)
+  (cond ((empty-termlist? terms) 
+         (string-append "[0]" var "^0"))
+        ((=zero? (coeff (first-term terms)))
+         (repr-termlist (rest-terms terms)))
+        ((empty-termlist? (rest-terms terms))
+         (repr-term var (first-term terms)))
+        (else
+          (string-append 
+            (repr-termlist var (rest-terms terms))
+            " + "
+            (repr-term var (first-term terms))))))
+```
+
 Всё! Сохранимся на этой точке (потому что в будущем мы будем объединять обе версии полиномов).
 И перейдём к рассмотрению dense полиномов наконец.
 
