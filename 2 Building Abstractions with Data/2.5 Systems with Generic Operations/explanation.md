@@ -2402,7 +2402,7 @@ apply-generic: method not found cosine (complex) [,bt for context]
 
 Мы попытаемся поменять polynomial package минимальным образом. Для начала изменить конструктор ```make-poly```:
 ```racket
-(define (make-poly variable term-list)
+(define (make-poly-from-list variable term-list)
   (let ((term-list (map (lambda (t) 
                           (apply make-term t))
                         term-list)))
@@ -2411,6 +2411,9 @@ apply-generic: method not found cosine (complex) [,bt for context]
                  (lambda (term-list term)
                    (adjoin-term term term-list))
                  term-list))))
+(generics 'put 'make 'polynomial
+     (lambda (var terms) 
+       (tag (make-poly-from-list var terms))))
 ```
 
 Кратко, мы сделали так, что теперь репрезентация термов не зависит от конструктора. 
@@ -2473,7 +2476,7 @@ adjoin-term: term with order 0 already exists [,bt for context]
 ```
 
 Альтернативно конечно можно складывать термы. Но я боюсь это немножко плохая идея.
-Всё таки ajoin-term используется в первую очередь для модификации полиномов.
+Всё таки ```ajoin-term ```используется в первую очередь для модификации полиномов.
 
 И дополнительно поменяем ```repr-term```:
 ```racket
@@ -2494,4 +2497,125 @@ adjoin-term: term with order 0 already exists [,bt for context]
 Всё! Сохранимся на этой точке (потому что в будущем мы будем объединять обе версии полиномов).
 И перейдём к рассмотрению dense полиномов наконец.
 
+Теперь поменяем ```term-list``` так как нам надо: мы будем хранить первым аргументом ```order``` первого терма, а дальше сами термы: например вот так:
+```
+(4 2 0 2 4) -> 2x^4 + 2x^6 + 4x^7
+```
 
+Давайте сделаем ```first-term``` и ```rest-term```:
+```racket
+(define (first-term term-list) 
+    (make-term (car term-list)
+               (cadr term-list)))
+(define (rest-terms term-list)
+    (if (empty-termlist? (cddr term-list))
+      (the-empty-termlist)
+      (cons (dec (car term-list))
+            (cddr term-list))))
+```
+
+Давайте потестируем:
+```
+> (first-term '(4 2 0 2 4))
+(4 2)
+> (rest-terms '(4 2 0 2 4))
+(5 0 2 4)
+> (rest-terms '(4 4))
+()
+```
+
+Отлично, теперь надо как-то добавлять термы, меняем ```adjoin-term```:
+```racket
+(define (adjoin-term term term-list)
+  (define (vals term-list)
+    (if (empty-termlist? term-list)
+      term-list
+      (cdr term-list)))
+  (define (cons-term term term-list)
+    (cons (order term)
+          (cons (coeff term)
+                (vals term-list))))
+  (define (pad n lst)
+    (if (zero? n)
+      lst 
+      (pad (dec n) (cons 0 lst))))
+  (define (pad-to-term term term-list)
+    (cons (inc (order term))
+          (pad (- (car term-list)
+                  (order term)
+                  1)
+               (cdr term-list))))
+  (cond ((=zero? (coeff term))
+         term-list)
+        ((empty-termlist? term-list)
+         (cons-term term
+                    term-list)) 
+        ((order= term (first-term term-list))
+         (cond ((=zero? (coeff (first-term term-list)))
+                (cons-term term
+                           (rest-terms term-list)))
+               (else
+                (error 'adjoin-term
+                       "term with order ~a already exists ~a"
+                       (order term)
+                       term-list))))
+        ((order< term (first-term term-list)) 
+         (cons-term term
+                    (pad-to-term term term-list)))
+        ((order> term (first-term term-list))
+         (adjoin-term (first-term term-list)
+               (adjoin-term term (rest-terms term-list))))))
+
+```
+
+В кратце единтсвенное место где мы реально что-то вставляем — это случай когда order полинома сопоставим с ```order``` терма.
+И когда коэффициент в полиноме нулевой. Давайте попробуем:
+```
+> (adjoin-term (make-term 3 1) '(4 2 0 2 4))
+(3 1 2 0 2 4)
+> (adjoin-term (make-term 4 1) '(4 2 0 2 4))
+adjoin-term: term with order 4 already exists (4 2 0 2 4) [,bt for context]
+> (adjoin-term (make-term 4 0) '(4 2 0 2 4))
+(4 2 0 2 4)
+> (adjoin-term (make-term 5 0) '(4 2 0 2 4))
+(4 2 0 2 4)
+> (adjoin-term (make-term 5 1) '(4 2 0 2 4))
+(4 2 1 2 4)
+> (adjoin-term (make-term 6 1) '(4 2 0 2 4))
+adjoin-term: term with order 6 already exists (6 2 4) [,bt for context]
+> (adjoin-term (make-term 1 1) '(4 2 0 2 4))
+(1 1 0 0 2 0 2 4)
+> (adjoin-term (make-term 8 1) '(4 2 0 2 4))
+(4 2 0 2 4 1)
+> (adjoin-term (make-term 12 1) '(4 2 0 2 4))
+(4 2 0 2 4 0 0 0 0 1)
+```
+
+И давайте проверим что всё у нас работает:
+```
+> (define p1
+    (make-polynomial 
+      'x
+      `((1 ,(make-integer 1))
+        (6 ,(make-polynomial 'y
+                             `((0 ,(make-integer 1))
+                               (1 ,(make-integer 2))))))))
+> (define p2
+    (make-polynomial 
+      'x
+      `((1 ,(make-integer 4))
+        (4 ,(make-polynomial 'y
+                             `((1 ,(make-rational (make-integer 1) 
+                                                  (make-integer 2))))))
+        (6 ,(make-polynomial 'y
+                             `((0 ,(make-integer 1))
+                               (1 ,(make-integer 2))))))))
+> (repr p1) 
+"[[2]y^1 + [1]y^0]x^6 + [1]x^1"
+> (repr p2) 
+"[[2]y^1 + [1]y^0]x^6 + [[1/2]y^1]x^4 + [4]x^1"
+> (repr (sub p1 p2)) 
+"[[-1/2]y^1]x^4 + [-3]x^1"
+> (repr (mul p1 p2))
+"[[4]y^2 + [4]y^1 + [1]y^0]x^12 + [[1]y^2 + [1/2]y^1]x^10 + [[10]y^1 + [5]y^0]x^7 + [[1/2]y^1]x^5 + [4]x^2"
+```

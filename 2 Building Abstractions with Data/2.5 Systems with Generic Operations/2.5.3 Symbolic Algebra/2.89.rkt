@@ -862,7 +862,7 @@
       start 
       (foldr (op start (car seq)) op (cdr seq))))
 
-  (define (make-poly variable term-list)
+  (define (make-poly-from-list variable term-list)
     (let ((term-list (map (lambda (t) 
                             (apply make-term t))
                           term-list)))
@@ -871,6 +871,9 @@
                    (lambda (term-list term)
                      (adjoin-term term term-list))
                    term-list))))
+
+  (define (make-poly variable term-list)
+    (cons variable term-list))
 
   (define (variable p) (car p))
   (define (term-list p) (cdr p))
@@ -883,22 +886,53 @@
 
   ;; representation of terms and term lists
   (define (adjoin-term term term-list)
-    (cond ((=zero? (coeff term)) 
+    (define (vals term-list)
+      (if (empty-termlist? term-list)
+        term-list
+        (cdr term-list)))
+    (define (cons-term term term-list)
+      (cons (order term)
+            (cons (coeff term)
+                  (vals term-list))))
+    (define (pad n lst)
+      (if (zero? n)
+        lst 
+        (pad (dec n) (cons 0 lst))))
+    (define (pad-to-term term term-list)
+      (cons (inc (order term))
+            (pad (- (car term-list)
+                    (order term)
+                    1)
+                 (cdr term-list))))
+    (cond ((=zero? (coeff term))
            term-list)
           ((empty-termlist? term-list)
-           (cons term term-list))
-          ((order< term (first-term term-list)) 
-           (cons term term-list))
-          ((order> term (first-term term-list))
-           (cons (first-term term-list)
-                 (adjoin-term term (rest-terms term-list))))
+           (cons-term term
+                      term-list)) 
           ((order= term (first-term term-list))
-           (error 'adjoin-term
-                  "term with order ~a already exists"
-                  (order term)))))
+           (cond ((=zero? (coeff (first-term term-list)))
+                  (cons-term term
+                             (rest-terms term-list)))
+                 (else
+                  (error 'adjoin-term
+                         "term with order ~a already exists ~a"
+                         (order term)
+                         term-list))))
+          ((order< term (first-term term-list)) 
+           (cons-term term
+                      (pad-to-term term term-list)))
+          ((order> term (first-term term-list))
+           (adjoin-term (first-term term-list)
+                 (adjoin-term term (rest-terms term-list))))))
   (define (the-empty-termlist) '())
-  (define (first-term term-list) (car term-list))
-  (define (rest-terms term-list) (cdr term-list))
+  (define (first-term term-list) 
+    (make-term (car term-list)
+               (cadr term-list)))
+  (define (rest-terms term-list)
+    (if (empty-termlist? (cddr term-list))
+      (the-empty-termlist)
+      (cons (inc (car term-list))
+            (cddr term-list))))
   (define (empty-termlist? term-list) 
     (null? term-list))
   (define (make-term order coeff) 
@@ -952,6 +986,7 @@
             (rest-1 (rest-terms terms-1))
             (term-2 (first-term terms-2))
             (rest-2 (rest-terms terms-2)))
+
         (cond ((order< term-1 term-2)
                (adjoin-term term-1
                             (op rest-1 terms-2)))
@@ -962,7 +997,7 @@
                (adjoin-term (make-term
                               (order term-1)
                               (add (coeff term-1)
-                                 (coeff term-2)))
+                                   (coeff term-2)))
                             (op rest-1 rest-2))))))
 
     (define (op terms-1 terms-2)
@@ -1006,7 +1041,7 @@
     (cond ((empty-termlist? terms) 
            (string-append "[0]" var "^0"))
           ((=zero? (coeff (first-term terms)))
-           (repr-termlist (rest-terms terms)))
+           (repr-termlist var (rest-terms terms)))
           ((empty-termlist? (rest-terms terms))
            (repr-term var (first-term terms)))
           (else
@@ -1057,7 +1092,7 @@
   (generics 'put 'repr '(polynomial) repr-poly)
   (generics 'put 'make 'polynomial
        (lambda (var terms) 
-         (tag (make-poly var terms))))
+         (tag (make-poly-from-list var terms))))
   'done)
 
 ;; ======================================================
