@@ -2526,55 +2526,62 @@ adjoin-term: term with order 0 already exists [,bt for context]
 
 Отлично, теперь надо как-то добавлять термы, меняем ```adjoin-term```:
 ```racket
+(define (vals L)
+  (if (empty-termlist? L)
+    '() (cdr L)))
+(define (join L1 L2)
+  (define (prepend-zero L)
+    (cons (dec (car L))
+          (cons 0 (cdr L))))
+  (cond ((empty-termlist? L1) L2)
+        ((empty-termlist? L2) L1)
+        ((order> (first-term L1) (first-term L2))
+         (join L2 L1))
+        ((order< (first-term L1) (first-term L2))
+         (join L1 (prepend-zero L2)))
+        ((order= (first-term L1)
+                 (first-term L2))
+         (let* ((t1 (first-term L1))
+                (t2 (first-term L2))
+                (x (coeff t1))
+                (y (coeff t2))
+                (result (vals (join (rest-terms L1)
+                                    (rest-terms L2)))))
+           (cond ((and (not (=zero? x))
+                       (not (=zero? y)))
+                  (error 'join
+                         "can't join ~a ~a"
+                         L1 L2))
+                 ((=zero? x)
+                  (append (term->termlist t2) result))
+                 ((=zero? y)
+                  (append (term->termlist t1) result)))))))
+(define (term->termlist term)
+  (list (order term) (coeff term)))
 (define (adjoin-term term term-list)
-  (define (vals term-list)
-    (if (empty-termlist? term-list)
-      term-list
-      (cdr term-list)))
-  (define (cons-term term term-list)
-    (cons (order term)
-          (cons (coeff term)
-                (vals term-list))))
-  (define (pad n lst)
-    (if (zero? n)
-      lst 
-      (pad (dec n) (cons 0 lst))))
-  (define (pad-to-term term term-list)
-    (cons (inc (order term))
-          (pad (- (car term-list)
-                  (order term)
-                  1)
-               (cdr term-list))))
-  (cond ((=zero? (coeff term))
-         term-list)
-        ((empty-termlist? term-list)
-         (cons-term term
-                    term-list)) 
-        ((order= term (first-term term-list))
-         (cond ((=zero? (coeff (first-term term-list)))
-                (cons-term term
-                           (rest-terms term-list)))
-               (else
-                (error 'adjoin-term
-                       "term with order ~a already exists ~a"
-                       (order term)
-                       term-list))))
-        ((order< term (first-term term-list)) 
-         (cons-term term
-                    (pad-to-term term term-list)))
-        ((order> term (first-term term-list))
-         (adjoin-term (first-term term-list)
-               (adjoin-term term (rest-terms term-list))))))
-
+  (if (=zero? (coeff term))
+    term-list
+    (join (term->termlist term) term-list)))
 ```
 
-В кратце единтсвенное место где мы реально что-то вставляем — это случай когда order полинома сопоставим с ```order``` терма.
-И когда коэффициент в полиноме нулевой. Давайте попробуем:
+В кратце: мы сводим операцию adjoin к операции join. 
+Операция join это такое суммирование по нулям. Ну условно 
+```
+> (join '(1 1 0 3 0) '(1 0 2 0 4))
+(1 1 2 3 4)
+> (join '(1 1 2 3) '(5 5 6 7))
+(1 1 2 3 0 5 6 7)
+> (join '(1 1 2 3) '(3 0 4 5 0 0))
+(1 1 2 3 4 5 0 0)
+``` 
+
+Ну и т.д.
+
 ```
 > (adjoin-term (make-term 3 1) '(4 2 0 2 4))
 (3 1 2 0 2 4)
 > (adjoin-term (make-term 4 1) '(4 2 0 2 4))
-adjoin-term: term with order 4 already exists (4 2 0 2 4) [,bt for context]
+join: can't join (4 1) (4 2 0 2 4) [,bt for context]
 > (adjoin-term (make-term 4 0) '(4 2 0 2 4))
 (4 2 0 2 4)
 > (adjoin-term (make-term 5 0) '(4 2 0 2 4))
@@ -2582,7 +2589,7 @@ adjoin-term: term with order 4 already exists (4 2 0 2 4) [,bt for context]
 > (adjoin-term (make-term 5 1) '(4 2 0 2 4))
 (4 2 1 2 4)
 > (adjoin-term (make-term 6 1) '(4 2 0 2 4))
-adjoin-term: term with order 6 already exists (6 2 4) [,bt for context]
+join: can't join (6 2 4) (6 1) [,bt for context]
 > (adjoin-term (make-term 1 1) '(4 2 0 2 4))
 (1 1 0 0 2 0 2 4)
 > (adjoin-term (make-term 8 1) '(4 2 0 2 4))
@@ -2619,3 +2626,4 @@ adjoin-term: term with order 6 already exists (6 2 4) [,bt for context]
 > (repr (mul p1 p2))
 "[[4]y^2 + [4]y^1 + [1]y^0]x^12 + [[1]y^2 + [1/2]y^1]x^10 + [[10]y^1 + [5]y^0]x^7 + [[1/2]y^1]x^5 + [4]x^2"
 ```
+
