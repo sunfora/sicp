@@ -868,42 +868,13 @@
   (generics 'put 'coeff '(term) coeff)
   (generics 'put 'make 'term
             (lambda (x y)
-              (tag (make x y)))))
+              (tag (make x y))))
+  'done)
 
 ;; ======================================================
-;; polynomial package
+;; dense package
 ;; ======================================================
-(define (install-polynomial-package generics attach-tag)
-  ;; internal procedures
-  ;; representation of poly
-  (define (foldr start op seq)
-    (if (null? seq)
-      start 
-      (foldr (op start (car seq)) op (cdr seq))))
-
-  (define (make-poly-from-list variable term-list)
-    (let ((term-list (map (lambda (t) 
-                            (apply make-term t))
-                          term-list)))
-      (cons variable
-            (foldr (the-empty-termlist) 
-                   (lambda (term-list term)
-                     (adjoin-term term term-list))
-                   term-list))))
-
-  (define (make-poly variable term-list)
-    (cons variable term-list))
-
-  (define (variable p) (car p))
-  (define (term-list p) (cdr p))
-
-  (define (same-variable? x y)
-    (and (variable? x)
-         (variable? y)
-         (eq? x y)))
-  (define variable? symbol?)
-
-  ;; representation of terms and term lists
+(define (install-dense-package generics attach-tag)
   (define (vals L)
     (if (empty-termlist? L)
       '() (cdr L)))
@@ -911,10 +882,6 @@
 
   (define (empty-termlist? L)
     (null? L))
-  (define (min-order L)
-    (car L))
-  (define (max-order L)
-    (+ (car L) (length (vals L))))
   (define (first-term term-list) 
     (make-term (car term-list)
                (cadr term-list)))
@@ -925,7 +892,8 @@
             (cddr term-list))))
 
   (define (term->termlist term)
-    (list (order term) (coeff term)))
+    (make (order term) (list (coeff term))))
+
   (define (join L1 L2)
     (define (prepend-zero L)
       (cons (dec (car L))
@@ -953,11 +921,68 @@
                     (append (term->termlist t2) result))
                    ((=zero? y)
                     (append (term->termlist t1) result)))))))
+
+  (define (make order vals)
+    (if (null? vals)
+      vals
+      (cons order vals)))
+  ;; interface to the rest of the system
+  (define (tag x)
+    (attach-tag 'dense x))
+  (generics 'put 'empty-termlist? '(dense) empty-termlist?)
+  (generics 'put 'first-term '(dense) first-term)
+  (generics 'put 'rest-terms '(dense)
+            (lambda (x)
+              (tag (rest-terms x))))
+  (generics 'put 'join '(dense dense)
+            (lambda (x y)
+              (tag (join x y))))
+  (generics 'put 'make 'dense 
+            (lambda (x y)
+              (tag (make x y))))
+  'done)
+
+;; ======================================================
+;; polynomial package
+;; ======================================================
+(define (install-polynomial-package generics attach-tag)
+  ;; internal procedures
+  ;; representation of poly
+  (define (foldr start op seq)
+    (if (null? seq)
+      start 
+      (foldr (op start (car seq)) op (cdr seq))))
+
+  (define (make-poly-from-list variable term-list)
+    (let ((term-list (map (lambda (t) 
+                            (apply make-term t))
+                          term-list)))
+      (make-poly 
+        variable
+        (foldr (the-empty-termlist) 
+               (lambda (term-list term)
+                 (adjoin-term term term-list))
+               term-list))))
+
+  (define (make-poly variable term-list)
+    (cons variable term-list))
+
+  (define (variable p) (car p))
+  (define (term-list p) (cdr p))
+
+  (define (same-variable? x y)
+    (and (variable? x)
+         (variable? y)
+         (eq? x y)))
+  (define variable? symbol?)
+
+  ;; representation of terms and term lists
+  (define (the-empty-termlist) (make-dense '0 '()))
+
   (define (adjoin-term term term-list)
     (if (=zero? (coeff term))
       term-list
-      (join (term->termlist term) term-list)))
-
+      (join term term-list)))
 
   ;; operations on polynomials
   (define (count-nonzero L)
@@ -1141,6 +1166,12 @@
   (juggle 'put 'juggle '(number polynomial)
     (lambda (a b)
       (list (number->polynomial (variable b) a) b)))
+  (juggle 'put 'juggle '(term dense)
+    (lambda (x y)
+      (list (term->dense x) y)))
+  (juggle 'put 'juggle '(dense term)
+    (lambda (x y)
+      (list x (term->dense y))))
   'done)
 
 (define (tagged? datum)
@@ -1229,6 +1260,14 @@
 (define (order> x y) ((by order >) x y))
 (define (order>= x y) ((by order >=) x y))
 (define (order= x y) ((by order =) x y))
+
+(define (first-term x) (apply-generic 'first-term x))
+(define (rest-terms x) (apply-generic 'rest-terms x))
+(define (empty-termlist? x) (apply-generic 'empty-termlist? x))
+(define (join x y) (apply-generic 'join x y))
+
+(define (min-order L) (apply-generic 'min-order L))
+(define (max-order L) (apply-generic 'min-order L))
 ;; =====================================================
 ;; constructors
 ;; =====================================================
@@ -1247,6 +1286,8 @@
   ((generics 'get 'make 'polynomial) var terms))
 (define (make-term order coeff)
   ((generics 'get 'make 'term) order coeff))
+(define (make-dense order vals)
+  ((generics 'get 'make 'dense) order vals))
 ;; ======================================================
 ;; converters
 ;; ======================================================
@@ -1266,7 +1307,8 @@
   (make-polynomial var `((0 ,x))))
 (define (number->polynomial var x)
   (make-polynomial var `((0 ,x))))
-
+(define (term->dense x)
+  (make-dense (order x) (list (coeff x))))
 (define (juggle . args)
   (define (tags args)
     (map type-tag args))
@@ -1282,6 +1324,8 @@
 (install-scheme-number-package generics attach-tag)
 (install-number-package generics attach-tag)
 (install-term-package generics attach-tag)
+(install-dense-package generics attach-tag)
 (install-polynomial-package generics attach-tag)
+
 (define juggle-table (setup-table 'juggle))
 (install-juggle-package juggle-table)
