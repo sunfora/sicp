@@ -2627,3 +2627,81 @@ join: can't join (6 2 4) (6 1) [,bt for context]
 "[[4]y^2 + [4]y^1 + [1]y^0]x^12 + [[1]y^2 + [1/2]y^1]x^10 + [[10]y^1 + [5]y^0]x^7 + [[1/2]y^1]x^5 + [4]x^2"
 ```
 
+## 2.90
+
+Итак в прошлом задании мы уже поменяли репрезентацию термов нашего полинома. 
+
+И единственное что нам пришлось поменять — селекторы и adjoin-term.
+На самом деле можно заметить, что мы свели adjoin-term к комбинации приведения и мержа (он же join).
+
+Поэтому давайте выделим интерфейс к обоим пакетам:
+```
+first-term
+rest-terms
+empty-termlist?
+the-empty-termlist<type>
+term->termlist<type>
+join
+```
+
+Ну соответственно у нас будут следующие generic операции:
+```
+first-term
+rest-terms
+empty-termlist?
+join
+
+order
+coeff
+```
+
+А так же type-juggle
+```
+term dense -> dense dense
+term sparse -> sparse sparse
+dense sparse -> sparse sparse
+sparse dense -> sparse sparse
+```
+
+Давайте сделаем пакет term:
+```racket
+(define (order t) (apply-generic 'order t))
+(define (coeff t) (apply-generic 'coeff t))
+(define (by key p?)
+  (lambda (term-1 term-2)
+    (p? (key term-1) (key term-2))))
+(define (order< x y) ((by order <) x y))
+(define (order<= x y) ((by order <=) x y))
+(define (order> x y) ((by order >) x y))
+(define (order>= x y) ((by order >=) x y))
+(define (order= x y) ((by order =) x y))
+
+(define (make-term order coeff)
+  ((generics 'get 'make 'term) order coeff))
+
+;; ======================================================
+;; term package
+;; ======================================================
+(define (install-term-package generics attach-tag)
+  (define (make order coeff)
+    (list order coeff))
+  (define (order term)
+    (car term))
+  (define (coeff term)
+    (cadr term))
+  ;; interface to the rest of the system
+  (define (tag x)
+    (attach-tag 'term x))
+  (generics 'put 'order '(term) order)
+  (generics 'put 'coeff '(term) coeff)
+  (generics 'put 'make 'term
+            (lambda (x y)
+              (tag (make x y)))))
+
+(install-term-package generics attach-tag)
+```
+
+Теперь мы можем избавиться от соответствующих конструкторов и селекторов внутри polynomial package.
+Я код не буду приводить потому что он заключается в том что мы просто удаляем соответствующие строчки.
+
+
