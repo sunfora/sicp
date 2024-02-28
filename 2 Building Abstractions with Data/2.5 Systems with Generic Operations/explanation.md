@@ -2817,3 +2817,289 @@ sparse dense -> sparse sparse
 > (make-polynomial 'x '((1 2) (3 4)))
 (polynomial x dense 1 2 0 4)
 ```
+
+Теперь нам надо вернуть sparse полиномы. 
+Мы возьмём и сделаем примерно то же самое, что и раньше:
+
+```racket
+;; ======================================================
+;; polynomial package
+;; ======================================================
+(define (install-polynomial-package generics attach-tag)
+  ...
+  ;; representation of terms and term lists
+  (define (the-empty-termlist) (make-sparse '()))
+  ...
+  'done)
+
+;; ======================================================
+;; sparse package
+;; ======================================================
+(define (install-sparse-package generics attach-tag)
+  (define (join L1 L2)
+    (cond ((empty-termlist? L1)
+           L2)
+          ((empty-termlist? L2)
+           L1)
+          ((order> (first-term L1) (first-term L2))
+           (join L2 L1))
+          ((order< (first-term L1) (first-term L2))
+           (if (=zero? (coeff (first-term L1)))
+             (join (rest-terms L1) L2)
+             (cons (first-term L1)
+                   (join (rest-terms L1) L2))))
+          (else
+           (let* ((t1 (first-term L1))
+                  (c1 (coeff t1))
+                  (t2 (first-term L2))
+                  (c2 (coeff t2))
+                  (result (join (rest-terms L1)
+                                (rest-terms L2))))
+             (cond ((and (=zero? c1)
+                         (=zero? c2))
+                    result)
+                   ((=zero? c1)
+                    (cons t2 result))
+                   ((=zero? c2)
+                    (cons t1 result))
+                   (else
+                     (error 'join
+                            "can't join ~a ~a"
+                            L1 L2)))))))
+  (define (the-empty-termlist) '())
+  (define (first-term term-list) (car term-list))
+  (define (rest-terms term-list) (cdr term-list))
+  (define (empty-termlist? term-list) 
+    (null? term-list))
+
+  (define (foldr start op seq)
+      (if (null? seq)
+        start 
+        (foldr (op start (car seq)) op (cdr seq))))
+  (define (make lst)
+    (foldr (the-empty-termlist)
+           join 
+           (map (lambda (x) 
+                  (let ((t (make-term (car x) (cadr x))))
+                    (if (=zero? (coeff t))
+                      (the-empty-termlist)
+                      (list t))))
+                lst)))
+  ;; interface
+  (define (tag x)
+    (attach-tag 'sparse x))
+  (generics 'put 'make 'sparse
+            (lambda (x)
+              (tag (make x))))
+  (generics 'put 'join '(sparse sparse)
+            (lambda (x y)
+              (tag (join x y))))
+  (generics 'put 'first-term '(sparse) first-term)
+  (generics 'put 'rest-terms '(sparse)
+            (lambda (x)
+              (tag (rest-terms x))))
+  (generics 'put 'empty-termlist? '(sparse) empty-termlist?)
+  'done)
+
+;; ======================================================
+;; converters
+;; ======================================================
+...
+(define (term->sparse x)
+  (make-sparse (list (list (order x) (coeff x)))))
+(define (dense->sparse x)
+  (if (empty-termlist? x)
+    (make-sparse '())
+    (join (term->sparse (first-term x))
+          (dense->sparse (rest-terms x)))))
+
+
+;; ======================================================
+;; juggle package
+;; ======================================================
+(define (install-juggle-package juggle)
+  ...
+  (juggle 'put 'juggle '(sparse term)
+    (lambda (x y)
+      (list x (term->sparse y))))
+  (juggle 'put 'juggle '(term sparse)
+    (lambda (x y)
+      (list (term->sparse x) y)))
+  (juggle 'put 'juggle '(sparse dense)
+    (lambda (x y)
+      (list x (dense->sparse dense))))
+  (juggle 'put 'juggle '(dense sparse)
+    (lambda (x y)
+      (list (dense->sparse x) y)))
+  'done)
+
+;; =====================================================
+;; constructors
+;; =====================================================
+...
+(define (make-sparse lst)
+  ((generics 'get 'make 'sparse) lst))
+
+;; ======================================================
+;; installed
+;; ======================================================
+...
+(install-sparse-package generics attach-tag)
+```
+
+```
+> (make-polynomial 'x '((1 2) (0 0) (3 4)))
+(polynomial x sparse (term 1 2) (term 3 4))
+> (repr (make-polynomial 'x '((1 2) (3 4))))
+"[4]x^3 + [2]x^1"
+> (add (make-polynomial 'x '((1 2) (0 0) (3 4)))
+       (make-polynomial 'x '((3 -4) (1 -2))))
+(polynomial x sparse)
+```
+
+Ну в общем, как и ожидалось, оно и работает, что замечательно.
+Теперь нам надо добавить какой-то механизм, который будет выбирать какой полином строить.
+
+Потому что очевидно не все полиномы надо делать sparse.
+Например полином ```x + x^2 + x^3 + x^4 + x^5```, очевидно выгодней хранить как dense.
+
+Для этого мы сделаем процедуру ```densness```:
+```racket
+(define (install-polynomial-package ...)
+  ...
+  (define (terms L)
+    (if (empty-termlist? L)
+      '()
+      (cons (first-term L)
+            (terms (rest-terms L)))))
+  (define (max-order L)
+    (apply max (map order (terms L))))
+  (define (min-order L)
+    (apply min (map order (terms L))))
+  (define (count-nonzero L)
+    (apply + (map (lambda (x) (if (=zero? x) 0 1))
+                  (map coeff (terms L)))))
+  (define (densness L)
+    (if (empty-termlist? L)
+      1
+      (let ((span (inc (- (max-order L) 
+                       (min-order L)))))
+        (/ (count-nonzero L) span))))
+  ...
+  'done)
+```
+
+```
+> (densness (make-dense 1 '(0 0 1 1 0 0 1)))
+3/7
+> (densness (make-sparse '((1 1) (100500 1))))
+1/50250
+> (densness (make-sparse '((1 1) (100500 0))))
+1
+> (densness (make-sparse '((1 0) (100500 0))))
+1
+> (densness (make-dense 1 '()))
+1
+> (densness (make-dense 1 '(1 0 0 0 0 0 0 0 0 1)))
+1/5
+> (densness (make-dense 1 '(0 0 0 0 0 0 0 0 0 0)))
+0
+```
+
+Ну в общем это такой хороший показатель, насколько мы эффективно храним полином.
+Соответственно чем меньше значение, тем выгодней использовать sparse. Чем оно соответственно больше, тем выгодней использовать dense.
+
+Поэтому давайте возьмём самое тупое: 1/2.
+
+И напишем что-то такое:
+```racket
+(define (make-poly variable term-list)
+  (cons variable (densify term-list)))
+
+(define (termlist->sparse L)
+  (foldr (make-sparse '())
+         join
+         (terms L)))
+(define (termlist->dense L)
+  (foldr (make-dense 0 '())
+         join
+         (terms L)))
+(define (densify L)
+  (cond ((< (densness L) 1/4)
+         (if (equal? (type-tag L) 'sparse)
+           L
+           (termlist->sparse L)))
+        ((> (densness L) 1/2)
+         (if (equal? (type-tag L) 'dense)
+           L
+           (termlist->dense L)))
+        (else L)))
+```
+
+Теперь каждый раз когда мы создаём полином, допустим после некоторой операции, мы проверяем что происходит с его термами.
+И если термы слишком плотные — делаем плотные термы, иначе — другие.
+
+```
+> (define p1 (make-polynomial 'x '((1 2) (0 0) (3 4))))
+> p1
+(polynomial x dense 1 2 0 4)
+> (define p2 (make-polynomial 'x '((1 2) (0 0) (3 4) (100500 1))))
+> p2
+(polynomial x sparse (term 1 2) (term 3 4) (term 100500 1))
+> (sub p1 p2) 
+(polynomial x dense 100500 -1)
+> (mul p1 p2) 
+(polynomial x sparse (term 2 4) (term 4 16) (term 6 16) (term 100501 2) (term 100503 4))
+> (sub (mul p1 p2) (make-polynomial 'x '((100501 2) (100503 4))))
+(polynomial x dense 2 4 0 16 0 16)
+```
+
+Всё это можно дополнительно ускорить, если например добавить соответствующие поля в интерфейс термов.
+Ну условно чтобы не я считал, а чтобы densness поддерживалась самим термом.
+
+Но я не вижу в этом какого-то большого смысла, потому что у нас операции на полиномах и так линейные.
+
+Давайте на последок проверим какой-нибудь старый пример и убедимся что он возвращает всё то, что должен:
+```
+> (define p1
+    (make-polynomial 
+      'x
+      `((1 ,(make-integer 1))
+        (6 ,(make-polynomial 'y
+                             `((0 ,(make-integer 1))
+                               (1 ,(make-integer 2))))))))
+> (define p2
+    (make-polynomial 
+      'x
+      `((1 ,(make-integer 4))
+        (4 ,(make-polynomial 'y
+                             `((1 ,(make-rational (make-integer 1) 
+                                                  (make-integer 2))))))
+        (6 ,(make-polynomial 'y
+                             `((0 ,(make-integer 1))
+                               (1 ,(make-integer 2))))))))
+> (repr p1) 
+"[[2]y^1 + [1]y^0]x^6 + [1]x^1"
+> (repr p2) 
+"[[2]y^1 + [1]y^0]x^6 + [[1/2]y^1]x^4 + [4]x^1"
+> (repr (sub p1 p2)) 
+"[[-1/2]y^1]x^4 + [-3]x^1"
+> (repr (mul p1 p2))
+"[[4]y^2 + [4]y^1 + [1]y^0]x^12 + [[1]y^2 + [1/2]y^1]x^10 + [[10]y^1 + [5]y^0]x^7 + [[1/2]y^1]x^5 + [4]x^2"
+> p1
+(polynomial x sparse (term 1 (number integer . 1)) 
+                     (term 6 (polynomial y dense 0 (number integer . 1) (number integer . 2))))
+> p2
+(polynomial x sparse (term 1 (number integer . 4)) 
+                     (term 4 (polynomial y dense 1 (number rational 1 . 2))) 
+                     (term 6 (polynomial y dense 0 (number integer . 1) (number integer . 2))))
+> (sub p1 p2)
+(polynomial x sparse (term 1 (number integer . -3)) 
+                     (term 4 (polynomial y dense 1 (number rational -1 . 2))))
+> (mul p1 p2)
+(polynomial x sparse (term 2 (number integer . 4)) 
+                     (term 5 (polynomial y dense 1 (number rational 1 . 2))) 
+                     (term 7 (polynomial y dense 0 (number integer . 5) (number integer . 10))) 
+                     (term 10 (polynomial y dense 1 (number rational 1 . 2) (numb er integer . 1))) 
+                     (term 12 (polynomial y dense 0 (number integer . 1) (number integer . 4) (number integer . 4))))
+```

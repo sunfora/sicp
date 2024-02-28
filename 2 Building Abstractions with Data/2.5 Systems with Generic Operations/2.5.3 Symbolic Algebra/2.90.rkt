@@ -943,6 +943,75 @@
   'done)
 
 ;; ======================================================
+;; sparse package
+;; ======================================================
+(define (install-sparse-package generics attach-tag)
+  (define (join L1 L2)
+    (cond ((empty-termlist? L1)
+           L2)
+          ((empty-termlist? L2)
+           L1)
+          ((order> (first-term L1) (first-term L2))
+           (join L2 L1))
+          ((order< (first-term L1) (first-term L2))
+           (if (=zero? (coeff (first-term L1)))
+             (join (rest-terms L1) L2)
+             (cons (first-term L1)
+                   (join (rest-terms L1) L2))))
+          (else
+           (let* ((t1 (first-term L1))
+                  (c1 (coeff t1))
+                  (t2 (first-term L2))
+                  (c2 (coeff t2))
+                  (result (join (rest-terms L1)
+                                (rest-terms L2))))
+             (cond ((and (=zero? c1)
+                         (=zero? c2))
+                    result)
+                   ((=zero? c1)
+                    (cons t2 result))
+                   ((=zero? c2)
+                    (cons t1 result))
+                   (else
+                     (error 'join
+                            "can't join ~a ~a"
+                            L1 L2)))))))
+  (define (the-empty-termlist) '())
+  (define (first-term term-list) (car term-list))
+  (define (rest-terms term-list) (cdr term-list))
+  (define (empty-termlist? term-list) 
+    (null? term-list))
+
+  (define (foldr start op seq)
+      (if (null? seq)
+        start 
+        (foldr (op start (car seq)) op (cdr seq))))
+  (define (make lst)
+    (foldr (the-empty-termlist)
+           join 
+           (map (lambda (x) 
+                  (let ((t (make-term (car x) (cadr x))))
+                    (if (=zero? (coeff t))
+                      (the-empty-termlist)
+                      (list t))))
+                lst)))
+  ;; interface
+  (define (tag x)
+    (attach-tag 'sparse x))
+  (generics 'put 'make 'sparse
+            (lambda (x)
+              (tag (make x))))
+  (generics 'put 'join '(sparse sparse)
+            (lambda (x y)
+              (tag (join x y))))
+  (generics 'put 'first-term '(sparse) first-term)
+  (generics 'put 'rest-terms '(sparse)
+            (lambda (x)
+              (tag (rest-terms x))))
+  (generics 'put 'empty-termlist? '(sparse) empty-termlist?)
+  'done)
+
+;; ======================================================
 ;; polynomial package
 ;; ======================================================
 (define (install-polynomial-package generics attach-tag)
@@ -965,7 +1034,26 @@
                term-list))))
 
   (define (make-poly variable term-list)
-    (cons variable term-list))
+    (cons variable (densify term-list)))
+
+  (define (termlist->sparse L)
+    (foldr (make-sparse '())
+           join
+           (terms L)))
+  (define (termlist->dense L)
+    (foldr (make-dense 0 '())
+           join
+           (terms L)))
+  (define (densify L)
+    (cond ((< (densness L) 1/4)
+           (if (equal? (type-tag L) 'sparse)
+             L
+             (termlist->sparse L)))
+          ((> (densness L) 1/2)
+           (if (equal? (type-tag L) 'dense)
+             L
+             (termlist->dense L)))
+          (else L)))
 
   (define (variable p) (car p))
   (define (term-list p) (cdr p))
@@ -977,7 +1065,7 @@
   (define variable? symbol?)
 
   ;; representation of terms and term lists
-  (define (the-empty-termlist) (make-dense '0 '()))
+  (define (the-empty-termlist) (make-sparse '()))
 
   (define (adjoin-term term term-list)
     (if (=zero? (coeff term))
@@ -985,17 +1073,23 @@
       (join term term-list)))
 
   ;; operations on polynomials
-  (define (count-nonzero L)
+  (define (terms L)
     (if (empty-termlist? L)
-      0
-      (if (=zero? (coeff (first-term L)))
-        (inc (count-nonzero (rest-terms L)))
-        (count-nonzero (rest-terms L)))))
+      '()
+      (cons (first-term L)
+            (terms (rest-terms L)))))
+  (define (max-order L)
+    (apply max (map order (terms L))))
+  (define (min-order L)
+    (apply min (map order (terms L))))
+  (define (count-nonzero L)
+    (apply + (map (lambda (x) (if (=zero? x) 0 1))
+                  (map coeff (terms L)))))
   (define (densness L)
     (if (empty-termlist? L)
       1
-      (let ((span (- (max-order L) 
-                     (min-order L))))
+      (let ((span (inc (- (max-order L) 
+                          (min-order L)))))
         (/ (count-nonzero L) span))))
 
   (define (add-poly p1 p2)
@@ -1172,6 +1266,18 @@
   (juggle 'put 'juggle '(dense term)
     (lambda (x y)
       (list x (term->dense y))))
+  (juggle 'put 'juggle '(sparse term)
+    (lambda (x y)
+      (list x (term->sparse y))))
+  (juggle 'put 'juggle '(term sparse)
+    (lambda (x y)
+      (list (term->sparse x) y)))
+  (juggle 'put 'juggle '(sparse dense)
+    (lambda (x y)
+      (list x (dense->sparse y))))
+  (juggle 'put 'juggle '(dense sparse)
+    (lambda (x y)
+      (list (dense->sparse x) y)))
   'done)
 
 (define (tagged? datum)
@@ -1266,8 +1372,6 @@
 (define (empty-termlist? x) (apply-generic 'empty-termlist? x))
 (define (join x y) (apply-generic 'join x y))
 
-(define (min-order L) (apply-generic 'min-order L))
-(define (max-order L) (apply-generic 'min-order L))
 ;; =====================================================
 ;; constructors
 ;; =====================================================
@@ -1288,6 +1392,8 @@
   ((generics 'get 'make 'term) order coeff))
 (define (make-dense order vals)
   ((generics 'get 'make 'dense) order vals))
+(define (make-sparse lst)
+  ((generics 'get 'make 'sparse) lst))
 ;; ======================================================
 ;; converters
 ;; ======================================================
@@ -1316,7 +1422,13 @@
     (if proc
       (apply proc args)
     false)))
-
+(define (term->sparse x)
+  (make-sparse (list (list (order x) (coeff x)))))
+(define (dense->sparse x)
+  (if (empty-termlist? x)
+    (make-sparse '())
+    (join (term->sparse (first-term x))
+          (dense->sparse (rest-terms x)))))
 ;; ======================================================
 ;; installed
 ;; ======================================================
@@ -1325,6 +1437,7 @@
 (install-number-package generics attach-tag)
 (install-term-package generics attach-tag)
 (install-dense-package generics attach-tag)
+(install-sparse-package generics attach-tag)
 (install-polynomial-package generics attach-tag)
 
 (define juggle-table (setup-table 'juggle))
