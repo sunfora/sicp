@@ -3103,3 +3103,112 @@ sparse dense -> sparse sparse
                      (term 10 (polynomial y dense 1 (number rational 1 . 2) (numb er integer . 1))) 
                      (term 12 (polynomial y dense 0 (number integer . 1) (number integer . 4) (number integer . 4))))
 ```
+
+## 2.91
+
+Книга нам любезно предоставляет почти готовый код:
+```racket
+(define (div-terms L1 L2)
+  (if (empty-termlist? L1)
+      (list (the-empty-termlist) 
+            (the-empty-termlist))
+      (let ((t1 (first-term L1))
+            (t2 (first-term L2)))
+        (if (> (order t2) (order t1))
+            (list (the-empty-termlist) L1)
+            (let ((new-c (div (coeff t1) 
+                              (coeff t2)))
+                  (new-o (- (order t1) 
+                            (order t2))))
+              (let ((rest-of-result
+                     ⟨compute rest of result 
+                     recursively⟩ ))
+                ⟨form complete result⟩ ))))))
+```
+
+Давайте добавим сначала биндинги:
+```racket
+(define (div-poly p1 p2)
+    (define (poly terms)
+      (make-poly (variable p1) terms))
+    (if (same-variable? (variable p1)
+                        (variable p2))
+      (map poly (div-terms (term-list p1)
+                           (term-list p2)))
+      (error 'polynomial-package/div
+             "cannot div polynomials, not in a same var ~a ~a"
+             p1 p2)))
+
+(generics 'put 'div '(polynomial polynomial)
+     (lambda (x y) (map tag (div-poly x y))))
+```
+
+И теперь имплементируем div-terms:
+```racket
+(define (sub-terms L1 L2)
+    (add-terms L1 (negate-termlist L2)))
+
+(define (div-terms L1 L2)
+  (if (empty-termlist? L1)
+      (list (the-empty-termlist) 
+            (the-empty-termlist))
+      (let ((t1 (first-term L1))
+            (t2 (first-term L2)))
+        (if (> (order t2) (order t1))
+            (list (the-empty-termlist) L1)
+            (let* ((new-c (div (coeff t1) 
+                               (coeff t2)))
+                   (new-o (- (order t1) 
+                               (order t2)))
+                   (new-term (make-term new-o new-c))
+                   (deficit (mul-term new-term L2))
+                   (result (div-terms (sub-terms L1 deficit) L2))
+                   (quot (car result))
+                   (rem (cadr result)))
+              (list (adjoin-term new-term quot) rem))))))
+```
+
+И... нас ждёт облом и бесконечный цикл. Потому что я наркоман.
+Я только сейчас понял, что с точки зрения авторов ```first-term```, возвращает наибольший из термов... А не наименьший...
+
+Что ж... Это так-то поправимо! С небольшим пенальти на перформанс правда. Но в силу того, что мы всё равно умножаем и вычитаем, падения перформанса будет не существенным.
+
+Не менять же из-за этого весь код предыдущий.
+
+Так вот что нам надо понять, нам надо поменять ```first-term``` на некий допустим ```max-term```. И тогда у нас всё заработает.
+
+```racket
+(define (max-term L)
+  (if (empty-termlist? (rest-terms L))
+    (first-term L)
+    (max-term (rest-terms L))))
+
+(define (div-terms L1 L2)
+  (if (empty-termlist? L1)
+      (list (the-empty-termlist) 
+            (the-empty-termlist))
+      (let ((t1 (max-term L1))
+            (t2 (max-term L2)))
+        (if (> (order t2) (order t1))
+            (list (the-empty-termlist) L1)
+            (let* ((new-c (div (coeff t1) 
+                               (coeff t2)))
+                   (new-o (- (order t1) 
+                               (order t2)))
+                   (new-term (make-term new-o new-c))
+                   (deficit (mul-term new-term L2))
+                   (result (div-terms (sub-terms L1 deficit) L2))
+                   (quot (car result))
+                   (rem (cadr result)))
+              (list (adjoin-term new-term quot) rem))))))
+```
+
+И оно более менее работает:
+```
+> (define p1 (make-polynomial 'x '((5 1) (0 -1)))) 
+> (define p2 (make-polynomial 'x '((2 1) (0 -1)))) 
+> (map repr (div p1 p2))
+    ("[1]x^3 + [1]x^1" "[1]x^1 + [-1]x^0")
+> (map repr (div p1 2))
+    ("[1/2]x^5 + [-1/2]x^0" "[0]x^0")
+```
