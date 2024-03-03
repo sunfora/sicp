@@ -3212,3 +3212,233 @@ sparse dense -> sparse sparse
 > (map repr (div p1 2))
     ("[1/2]x^5 + [-1/2]x^0" "[0]x^0")
 ```
+
+## 2.92
+
+Итак, нас просят реализовать полиномиальную арифметику на разных переменных. 
+Для этого мы введём порядок на этих самых переменных, возьмём что-нибудь очевидное: лексикографический порядок.
+
+Перед нами 3 проблемы:
+1. Сами операции, как привести уже корректно отсортированные полиномы так, чтобы они сложились корректно?
+
+   В пояснении я думаю не нуждается.
+
+2. Как создать правильно отсортированный полином?
+
+   Ну тут проблематика понятная: например мы можем случайно сделать 
+   ```racket
+   (make-polynomial 'y '((1 ,(make-polynomial 'x ((1 2) (3 4))))
+                         (0 ,(make-polynomial 'x ((0 1) (1 1))))))
+   ```
+
+3. Как упростить получившийся полином после операции, ну допустим мы сложили что-то и у нас теперь какая-то такая гадость:
+   ```
+   > (repr ...)
+   "[[[1]z^0]y^0]x^0"
+   ```
+
+   Это конечно вполне себе неадекват и полиномы должны падать автоматически до упрощения.
+
+
+Проще всего сделать первую поправку.
+Если оба полинома одинаковые, то ничего делать не надо. Если переменная одного выше другой, то первый полином надо засунуть как нулевой терм. Ну условно ```[1]y^2 + [2]y -> [[1]y^2 + [2]y]x^0```.
+
+Потом достаточно просто добавить 3, это тупо старый добрый известный нам drop, который мы запихнем наверное туда-же в apply-generic.
+
+И уже в конце уже почти ну автоматически с помощью пункта 1 реализуется уже сортировочка полиномов.
+
+Итак **первое** выглядит примерно так:
+```racket
+(define (unify x y)
+  (let* ((x-var (symbol->string (variable x)))
+         (y-var (symbol->string (variable y)))
+         (var (string->symbol (if (string<? x-var y-var) 
+                                x-var y-var))))
+    (cond ((and (equal? var (variable x))
+                (equal? var (variable y)))
+           (list x y))
+          ((equal? var (variable x))
+           (list x (value->poly var (tag y))))
+          ((equal? var (variable y))
+      (list (value->poly var (tag x)) y)))))
+
+(generics 'put 'add '(polynomial polynomial)
+     (lambda (p1 p2) 
+       (tag (apply add-poly (unify p1 p2)))))
+(generics 'put 'mul '(polynomial polynomial)
+     (lambda (p1 p2) 
+       (tag (apply mul-poly (unify p1 p2)))))
+(generics 'put 'sub '(polynomial polynomial)
+     (lambda (x y) (tag (apply sub-poly (unify x y)))))
+(generics 'put 'div '(polynomial polynomial)
+     (lambda (x y) (map tag (apply div-poly (unify x y)))))
+```
+
+Давайте попробуем:
+```
+> (define p1 (make-polynomial 'x `((1 ,(make-polynomial 'y '((0 1) (1 2))))
+                                   (0 ,(make-polynomial 'y '((1 3)))))))
+> (define p2 (make-polynomial 'y '((1 -3) (0 1))))
+> (repr p1)
+"[[2]y^1 + [1]y^0]x^1 + [[3]y^1]x^0"
+> (repr p2)
+"[-3]y^1 + [1]y^0"
+> (repr (add p1 p2))
+"[[2]y^1 + [1]y^0]x^1 + [[1]y^0]x^0"
+```
+
+Как мы видим вполне себе всё хорошо. Давайте какой-то еще более сложный пример запустим:
+```
+> (define p1 (make-polynomial 'x `((1 ,(make-polynomial 'z '((0 1) (1 2))))
+                                   (0 ,(make-polynomial 'z '((1 3)))))))
+> (define p2 (make-polynomial 'w `((1 ,(make-polynomial 'y '((0 1) (1 2))))
+                                   (0 ,(make-polynomial 'y '((1 3)))))))
+> (repr p1)
+"[[2]z^1 + [1]z^0]x^1 + [[3]z^1]x^0"
+> (repr p2)
+"[[2]y^1 + [1]y^0]w^1 + [[3]y^1]w^0"
+> (repr (add p1 p2))
+"[[2]y^1 + [1]y^0]w^1 + [[[2]z^1 + [1]z^0]x^1 + [[3]y^1 + [[3]z^1]y^0]x^0]w^0"
+> (define p1 (make-polynomial 'x `((1 ,(make-polynomial 'y '((0 1) (1 2))))
+                                   (0 ,(make-polynomial 'y '((1 3)))))))
+> (define p2 (make-polynomial 'w `((1 ,(make-polynomial 'y '((0 1) (1 2))))
+                                   (0 ,(make-polynomial 'y '((1 3)))))))
+> (repr (sub p1 p2))
+"[[-2]y^1 + [-1]y^0]w^1 + [[[2]y^1 + [1]y^0]x^1]w^0"
+```
+
+Отлично, теперь давайте с этой мощью которую мы тут навертели, сделаем **второй** пункт.
+
+Это на самом деле достаточно просто: что есть полином? Сумма неких произведений отдельных мономов. 
+Которые суть есть полиномы... Ну в общем-то да!
+
+То есть на самом деле если мы конструкцию полиномов будем совершать через произведения и суммы правильных полиномов, то задача по сути решена.
+
+Давайте именно это мы и сделаем. Да это может быть не супер наверное не супер эффективно. Но в принципе наверное более менее линейно в случае уже отсортированных полиномов, если так поприкидывать, что происходит внутри.
+
+```racket
+(define (make-poly-from-list var term-list)
+  (define (term order)
+    (tag (make-poly var 
+                    (make-dense order '(1)))))
+  (define (mult t)
+    (let ((order (car t))
+          (coeff (cadr t)))
+      (mul coeff (term order))))
+  (define (empty) 
+    (tag (make-poly var (the-empty-termlist))))
+  (define (strip-tag p)
+    (if (and (equal? 'polynomial (type-tag p))
+             (equal? var (variable (contents p))))
+      (contents p)
+      (make-poly var (make-dense '0 (list p)))))
+  (foldr (empty)
+         add
+         (map mult term-list)))
+
+(generics 'put 'make 'polynomial
+     (lambda (var terms) 
+       (make-poly-from-list var terms)))
+```
+
+Итак что происходит? Сначала мы из термов конструируем полиномы за счёт того, что просто умножаем термы на непосредственно такие мономчики. А потом их складываем. В принципе мы гарантируем что что-то получим, но не гарантируем, что это таки ваще будет полином некой переменной. Ну... с этим можно побороться тем, что в конце мы вообще говоря в одном случае выкинем тег, а в другом просто сконструируем полином у которого на нулевом месте будет наш терм.
+
+Единственная проблема конечно у нас возникает с тем, что раньше-то у нас это и был конструктор единственный. И сейчас будет происходить какой-то треш, ну а точнее бесконечный цикл. Почему? Ну потому что чтобы умножить число на полином, надо число превратить в полином и умножить полиномы, а это требует использования конструктора полиномов... И на самом деле нет. Давайте это недоразумение немного исправим, выкинув всё же конструктор ```make-poly``` в общее пользование. Выкинем его как ```make-poly-from-termlist```.
+
+```racket
+(define (...)
+  ...
+  (generics 'put 'make-polynomial-from-termlist 'polynomial
+         (lambda (var terms) 
+           (tag (make-poly var terms))))
+  ...
+ 'done)
+
+;; =====================================================
+;; constructors
+;; =====================================================
+(define (make-polynomial-from-termlist var terms)
+  ((generics 'get 'make-polynomial-from-termlist 'polynomial) var terms))
+
+;; ======================================================
+;; converters
+;; ======================================================
+(define (*->polynomial var x)
+  (make-polynomial-from-termlist 
+    var 
+    (make-dense 0 (list x))))
+(define (scheme-number->polynomial var x)
+  (*->polynomial var x))
+(define (number->polynomial var x)
+  (*->polynomial var x))
+```
+
+Это всё таки внутренний метод пакета, и мы как-то должны всё таки возвращать полиномы, которые нас попросили, а не что попало. Хотя конечно контракт можно и изменить, но зачем это делать, если его легко и просто соблесть. 
+
+Давайте проверим, что всё работает так как мы ожидаем, в том числе для случаев, которые мы раньше чот не рассматривали.
+```
+> (repr (make-polynomial 'x `((1 ,(make-polynomial 'y '((0 1) (1 2))))
+                              (0 ,(make-polynomial 'y '((1 3)))))))
+"[[2]y^1 + [1]y^0]x^1 + [[3]y^1]x^0"
+> (repr (make-polynomial 'y `((1 ,(make-polynomial 'x '((0 3) (1 2))))
+                              (0 ,(make-polynomial 'x '((1 1)))))))
+"[[2]y^1 + [1]y^0]x^1 + [[3]y^1]x^0"
+> (repr (make-polynomial 'x `((1 ,(make-polynomial 'x '((0 3) (1 2))))
+                              (0 ,(make-polynomial 'x '((1 1)))))))
+"[2]x^2 + [4]x^1"
+> (repr (make-polynomial 'y `((1 ,(make-polynomial 'x '()))
+                              (0 ,(make-polynomial 'x '())))))
+"[0]x^0"
+> (repr (make-polynomial 'x `((1 ,(make-polynomial 'y '()))
+                              (0 ,(make-polynomial 'y '())))))
+"[0]x^0"
+```
+
+Ну и финал, не обязательный, всей этой эпопеи заключается в том, что мы упрощаем нашу дичь. Наверное уже пора сделать башню из типов: аля ```number -> polynomial```. Но я пока не очень хочу это делать. Поэтому мы сделаем подобное упрощение внутри самих полиномов: потом если что переделаем.
+
+Я думаю просто подменить ```tag``` на следующее:
+```racket
+(define (tag-simplify p)
+  (cond ((empty-termlist? (term-list p)) 0)
+        ((zero? (max-order (term-list p)))
+         (coeff (first-term (term-list p))))
+        (else
+         (tag p))))
+
+(generics 'put 'add '(polynomial polynomial)
+     (lambda (p1 p2) 
+       (tag-simplify (apply add-poly (unify p1 p2)))))
+(generics 'put 'mul '(polynomial polynomial)
+     (lambda (p1 p2) 
+       (tag-simplify (apply mul-poly (unify p1 p2)))))
+(generics 'put 'negate '(polynomial)
+     (lambda (p) (tag-simplify (negate-poly p))))
+(generics 'put 'variable '(polynomial)
+     (lambda (p) (variable p)))
+(generics 'put 'sub '(polynomial polynomial)
+     (lambda (x y) (tag-simplify (apply sub-poly (unify x y)))))
+(generics 'put 'div '(polynomial polynomial)
+     (lambda (x y) (map tag-simplify (apply div-poly (unify x y)))))
+```
+
+```
+> (repr (mul (make-polynomial-from-termlist 'x (make-dense 0 '(1))) 
+             (mul (make-polynomial-from-termlist 'y (make-dense 0 '(2)))
+                  (make-polynomial-from-termlist 'z (make-dense 0 '(3))))))
+
+"6"
+> (define p1
+    (make-polynomial 
+      'x
+      `((0 ,(make-rational (make-integer 1) (make-integer 3)))
+        (1 ,(make-integer 1)))))
+> (define p2
+    (make-polynomial 
+      'x
+      `((0 ,(make-rational (make-integer 2) (make-integer 3)))
+        (1 ,(make-integer -1)))))
+> (repr (add p1 p2))
+"1"
+```
+
+So far so good..
