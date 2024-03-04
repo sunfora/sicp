@@ -3689,3 +3689,70 @@ x^3 - x = x (x + 1) (x - 1) = (x + 1) (x^2 - x)
 Ответ-то в общем верный. 
 
 Вот только он что-то какой-то дикий. Как подсказывает footnote — это нам еще повезло, что у нас хорошая рациональная арифметика реализована, потому что мы-то могли бы получить что-нибудь вроде плавающих чисел. И всё... Точность бы быстро улетела, потому что мы экспоненциально делим полиномы на чиселку. И в итоге всё может очень-очень быстро деградировать.
+
+## 2.96
+
+```racket
+(define (gcd-terms a b)
+  (if (empty-termlist? b)
+    a
+    (gcd-terms b (pseudoremainder-terms a b))))
+
+(define (pseudoremainder-terms a b)
+  (define (pow c t)
+    (if (zero? t) 1 (mul c (pow c (dec t)))))
+  (let ((c (pow (coeff (max-term b)) 
+                (+ 1 (max-order a) (- (max-order b))))))
+    (remainder-terms (mul-term (make-term 0 c) a) b)))
+```
+
+Давайте попробуем:
+```
+> (define p1 (make-polynomial 'x '((2 1) (1 -2) (0 1))))
+> (define p2 (make-polynomial 'x '((2 11) (0 7))))
+> (define p3 (make-polynomial 'x '((1 13) (0 5))))
+> (define q1 (mul p1 p2))
+> (define q2 (mul p1 p3))
+> (repr (greatest-common-divisor q1 q2))
+"[1458]x^2 + [-2916]x^1 + [1458]x^0"
+```
+
+Вот почему такая именно константа? Ну потому что ровно столько делений происходит по-сути. Как максимум столько.
+Поэтому если умножить на такую константу то всё будет хорошо — делители будут целые.
+
+Вторая часть нашего задания состоит в том, чтобы мы еще общие делители подубрали.
+```racket
+(define (gcd-terms a b)
+  (if (empty-termlist? b)
+    (reduce-coeffs a)
+    (gcd-terms b (pseudoremainder-terms a b))))
+
+(define (map-term f L)
+  (if (empty-termlist? L)
+    L
+    (let* ((h (first-term L))
+           (h* (make-term (order h) 
+                          (f (coeff h))))
+           (r (rest-terms L))
+           (r* (map-term f (rest-terms L))))
+      (adjoin-term h* r*))))
+
+(define (gcd-of-terms L)
+  (let ((cfs (map coeff (terms L))))
+    (if (null? cfs)
+      1
+      (foldr (car cfs) 
+             greatest-common-divisor 
+             (cdr cfs)))))
+
+(define (reduce-coeffs L)
+  (let ((factor (gcd-of-terms L)))
+    (map-term (lambda (c) (div c factor))
+              L)))
+```
+
+С чем мы успешно справились:
+```
+> (repr (greatest-common-divisor q1 q2))
+"[1]x^2 + [-2]x^1 + [1]x^0"
+```
