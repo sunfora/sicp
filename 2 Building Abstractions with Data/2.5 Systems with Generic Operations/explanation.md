@@ -3752,3 +3752,112 @@ x^3 - x = x (x + 1) (x - 1) = (x + 1) (x^2 - x)
 > (repr (greatest-common-divisor q1 q2))
 "[1]x^2 + [-2]x^1 + [1]x^0"
 ```
+
+## 2.97
+
+Ну всё мы подошли к финалу эпопеи. 
+Теперь у нас есть почти-что всё что нужно.
+
+Нам надо сделать generic reduce для полиномов и прочих чисел.
+```racket
+(define (reduce x y) (apply-generic 'reduce x y))
+```
+
+Начнём с полиномов:
+```racket
+(define (pseudodiv-terms a b)
+  (define (pow c t)
+    (if (zero? t) 1 (mul c (pow c (dec t)))))
+  (let ((c (pow (coeff (max-term b)) 
+                (max 0 (+ 1 (max-order a) (- (max-order b)))))))
+    (div-terms (mul-term (make-term 0 c) a) b)))
+
+(define (pseudoremainder-terms a b)
+  (cadr (pseudodiv-terms a b)))
+
+(define (pseudoquot-terms a b)
+  (car (pseudodiv-terms a b)))
+
+(define (reduce-terms-coeffs L1 L2)
+  (let ((factor (greatest-common-divisor 
+                  (gcd-of-terms L1)
+                  (gcd-of-terms L2))))
+    (map (lambda (L)
+           (map-term (lambda (c)
+                       (div c factor))
+                     L))
+         (list L1 L2))))
+
+(define (reduce-terms L1 L2)
+  (let ((comm (gcd-terms L1 L2)))
+    (reduce-terms-coeffs 
+      (pseudoquot-terms L1 comm)
+      (pseudoquot-terms L2 comm))))
+
+(define (reduce-poly p1 p2)
+  (define (poly L) (make-poly (variable p1) L))
+  (if (same-variable? (variable p1)
+                      (variable p2))
+    (map poly (reduce-terms (term-list p1)
+                            (term-list p2)))
+    (error 'polynomial-package/reduce
+           "cannot reduce polynomials, not in a same var ~a ~a"
+           p1 p2)))
+
+(generics 'put 'reduce '(polynomial polynomial)
+     (lambda (x y) (map tag-simplify (apply reduce-poly (unify x y)))))
+```
+
+Далее сделаем для scheme-number:
+```racket
+(define (reduce-integer n d)
+    (let ((g (gcd n d)))
+      (list (/ n g) (/ d g))))
+
+(generics 'put 'reduce '(scheme-number scheme-number)
+       (lambda (x y) (map tag (reduce-integer x y))))
+```
+
+Я позволю себе не делать для пакета number. 
+Ну... как бы. Понятно всё.
+
+Давайте сделаем наконец добавим reduce в пакете rational:
+```racket
+(define (numer x) (car x))
+(define (denom x) (cadr x))
+
+(define (make-rat n d)
+  (reduce n d))
+```
+
+И потрогаем происходящее:
+```
+> (make-rational 2 4)
+(rational 1 2)
+> (define p1 
+    (make-polynomial 'x '((1 1) (0 1))))
+> (define p2 
+    (make-polynomial 'x '((3 1) (0 -1))))
+> (define p3 
+    (make-polynomial 'x '((1 1))))
+> (define p4 
+    (make-polynomial 'x '((2 1) (0 -1))))
+> (define rf1 (make-rational p1 p2))
+> (define rf2 (make-rational p3 p4))
+> (repr rf1)
+"[1]x^1 + [1]x^0/[1]x^3 + [-1]x^0"
+> (repr rf2)
+"[1]x^1/[1]x^2 + [-1]x^0"
+> (repr (add rf1 rf2))
+"[-1]x^3 + [-2]x^2 + [-3]x^1 + [-1]x^0/[-1]x^4 + [-1]x^3 + [1]x^1 + [1]x^0"
+```
+
+Вот, ну в принципе это то, что мы ожидаем. Потому что если руками сложить, то получится что-то вроде:
+```
+    x^3 + 2x^2 + 3x + 1          -x^3 + -2x^2 + -3x + -1
+----------------------------- = -------------------------
+(x + 1) (x - 1) (x^2 + x + 1)      -x^4 + -x^3 + x + 1
+```
+
+Можно еще всякой ерундой позаниматься: например различать какие-то случаи и рациональные функции не только для полиномов с целыми коэффициентами. Можно сделать башню из ```number -> polynomial -> rational function```. 
+Но если честно я так долго делал эту секцию, что пора наверное прекратить угарать и остановиться на этом.
