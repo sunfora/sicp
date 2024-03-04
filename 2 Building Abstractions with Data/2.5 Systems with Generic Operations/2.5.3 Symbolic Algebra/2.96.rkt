@@ -1428,7 +1428,7 @@
        (lambda (p) (tag-simplify (negate-poly p))))
   (generics 'put 'greatest-common-divisor '(polynomial polynomial)
     (lambda (x y)
-      (tag-simplify (gcd-poly x y))))
+      (tag-simplify (apply gcd-poly (unify x y)))))
   (generics 'put 'variable '(polynomial)
        (lambda (p) (variable p)))
   (generics 'put 'sub '(polynomial polynomial)

@@ -3589,7 +3589,7 @@ So far so good..
   ...
   (generics 'put 'greatest-common-divisor '(polynomial polynomial)
     (lambda (x y)
-      (tag-simplify (gcd-poly x y))))
+      (tag-simplify (apply gcd-poly (unify x y)))))
   ...
   'done)
 
