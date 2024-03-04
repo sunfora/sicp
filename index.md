@@ -11,6 +11,7 @@
 * [разбор 2.3](./2 Building Abstractions with Data/2.3 Symbolic Data/explanation.md)
 * [разбор 2.3+ (лекция 4A)](./2 Building Abstractions with Data/2.3+ Pattern Matching/explanation.md)
 * [разбор 2.4](./2 Building Abstractions with Data/2.4 Multiple Representations for Abstract Data/explanation.md)
+* [разбор 2.5](./2 Building Abstractions with Data/2.5 Systems with Generic Operations/explanation.md)
 
 # Extra
 
