@@ -3442,3 +3442,104 @@ sparse dense -> sparse sparse
 ```
 
 So far so good..
+
+## 2.93
+
+Давайте сделаем generic rational.
+```racket
+;; ======================================================
+;; rational package 
+;; ======================================================
+(define (install-rational-package generics attach-tag)
+  ;; internal procedures
+  (define (numer x) (car x))
+  (define (denom x) (cdr x))
+
+  (define (make-rat n d)
+    (cons n d))
+
+  (define (add-rat x y)
+    (make-rat (add (mul (numer x) (denom y))
+                   (mul (numer y) (denom x)))
+              (mul (denom x) (denom y))))
+  (define (sub-rat x y)
+    (make-rat (sub (mul (numer x) (denom y))
+                   (mul (numer y) (denom x)))
+              (mul (denom x) (denom y))))
+  (define (mul-rat x y)
+    (make-rat (mul (numer x) (numer y))
+              (mul (denom x) (denom y))))
+  (define (div-rat x y)
+    (make-rat (mul (numer x) (denom y))
+              (mul (denom x) (numer y))))
+  (define (eq-rat? x y)
+    (equ? (mul (numer x) (denom y))
+          (mul (numer y) (denom x))))
+
+  (define (zero-rat? x)
+    (=zero? (numer x)))
+
+  
+  (define (negate-rat x)
+    (make-rat (negate (numer x))
+              (denom x)))
+
+
+  (define (repr-rat r)
+    (string-append 
+      (repr (numer r))
+      "/"
+      (repr (denom r))))
+
+  ;; interface to rest of the system
+  (define (tag x) (attach-tag 'rational x))
+  (generics 'put 'numer '(rational) 
+            (lambda (x) 
+              (make-integer (numer x))))
+  (generics 'put 'denom '(rational) 
+            (lambda (x) 
+              (make-integer (denom x))))
+  (generics 'put 'add '(rational rational)
+       (lambda (x y) (tag (add-rat x y))))
+  (generics 'put 'sub '(rational rational)
+       (lambda (x y) (tag (sub-rat x y))))
+  (generics 'put 'mul '(rational rational)
+       (lambda (x y) (tag (mul-rat x y))))
+  (generics 'put 'div '(rational rational)
+       (lambda (x y) (tag (div-rat x y))))
+  (generics 'put 'negate '(rational) 
+       (lambda (x) (tag (negate-rat x))))
+  (generics 'put 'equ? '(rational rational) eq-rat?)
+  (generics 'put '=zero? '(rational) zero-rat?)
+  (generics 'put 'repr '(rational) repr-rat)
+  (generics 'put 'make 'rational
+       (lambda (n d)
+         (tag (make-rat n d))))
+  'done)
+
+(install-rational-package generics attach-tag)
+```
+
+Что хочу заметить: мы никак не будем менять number rational. Потому что... незачем.
+Вот. Поэтому давайте добавим конструктор (в том числе поменяем существующий):
+```racket
+(define (make-rational-number n d) (apply-generic 'make-rational n d))
+(define (make-rational n d)
+  ((generics 'get 'make 'rational) n d))
+```
+
+```
+> (define p1 (make-polynomial 'x '((2 1) (0 1))))
+> (define p2 (make-polynomial 'x '((3 1) (0 1))))
+> (define rf (make-rational p2 p1))
+> (repr p1)
+"[1]x^2 + [1]x^0"
+> (repr p2)
+"[1]x^3 + [1]x^0"
+> (repr rf)
+"[1]x^3 + [1]x^0/[1]x^2 + [1]x^0"
+> (repr (add rf rf))
+"[2]x^5 + [2]x^3 + [2]x^2 + [2]x^0/[1]x^4 + [2]x^2 + [1]x^0"
+```
+
+Ну и оно действительно ничего не сокращает.
