@@ -1071,10 +1071,8 @@
 
   ;; interface to rest of the system
   (define (tag x) (attach-tag 'rational x))
-  (generics 'put 'numer '(rational) 
-            (lambda (x) 
-              (make-integer (numer x))))
-  (generics 'put 'denom '(rational) 
+  (generics 'put 'numer '(rational) numer) 
+  (generics 'put 'denom '(rational) denom) 
             (lambda (x) 
               (make-integer (denom x))))
   (generics 'put 'add '(rational rational)

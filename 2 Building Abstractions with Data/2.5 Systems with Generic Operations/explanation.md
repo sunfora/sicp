@@ -3493,12 +3493,8 @@ So far so good..
 
   ;; interface to rest of the system
   (define (tag x) (attach-tag 'rational x))
-  (generics 'put 'numer '(rational) 
-            (lambda (x) 
-              (make-integer (numer x))))
-  (generics 'put 'denom '(rational) 
-            (lambda (x) 
-              (make-integer (denom x))))
+  (generics 'put 'numer '(rational) numer) 
+  (generics 'put 'denom '(rational) denom) 
   (generics 'put 'add '(rational rational)
        (lambda (x y) (tag (add-rat x y))))
   (generics 'put 'sub '(rational rational)
