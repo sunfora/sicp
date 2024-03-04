@@ -3543,3 +3543,110 @@ So far so good..
 ```
 
 Ну и оно действительно ничего не сокращает.
+
+## 2.94
+
+```racket
+;; =====================================================
+;; generics operations
+;; =====================================================
+...
+(define (greatest-common-divisor a b) (apply-generic 'greatest-common-divisor a b))
+
+;; ======================================================
+;; scheme-number package
+;; ======================================================
+(define (install-scheme-number-package ...)
+  ...
+  (generics 'put 'greatest-common-divisor '(scheme-number scheme-number)
+         (lambda (x y) (tag (gcd x y))))
+  ...
+  'done)
+
+
+;; ======================================================
+;; polynomial package
+;; ======================================================
+(define (install-polynomial-package generics attach-tag)
+  ...
+  (define (gcd-terms a b)
+    (if (empty-termlist? b)
+      a
+      (gcd-terms b (remainder-terms a b))))
+
+  (define (remainder-terms a b)
+    (cadr (div-terms a b)))
+
+  (define (gcd-poly p1 p2)
+    (if (same-variable? (variable p1)
+                        (variable p2))
+      (make-poly (variable p1)
+                 (gcd-terms (term-list p1)
+                            (term-list p2)))
+      (error 'polynomial-package/gcd
+             "cannot gcd polynomials, not in a same var ~a ~a"
+             p1 p2)))
+  ...
+  (generics 'put 'greatest-common-divisor '(polynomial polynomial)
+    (lambda (x y)
+      (tag-simplify (gcd-poly x y))))
+  ...
+  'done)
+
+;; ======================================================
+;; number package
+;; ======================================================
+(define (install-number-package export-generics export-tag)
+  ...
+  (define (install-rational-package ...)
+    ...
+    (define (gcd-rat x y)
+      (let ((result (gcd (/ (numer x) (denom x))
+                         (/ (numer y) (denom y)))))
+        (make-rat (numerator result)
+                  (denominator result))))
+    ...
+    (generics 'put 'greatest-common-divisor '(rational rational)
+      (lambda (x y)
+        (tag (gcd-rat x y))))
+    ...
+    'done)
+  ...
+  (define (greatest-common-divisor x y) (apply-generic 'greatest-common-divisor x y))
+  ...
+  (export-generics 'put 'greatest-common-divisor '(number number)
+     (lambda (x y)
+       (export-tag 'number (greatest-common-divisor x y))))
+  ...
+  'done)
+```
+
+```
+> (greatest-common-divisor 35 21)
+7
+> (greatest-common-divisor 35/81 21/33)
+7/891
+> (greatest-common-divisor (make-rational-number (make-integer 35) (make-integer 81)) 
+                           (make-rational-number (make-integer 21) (make-integer 33)))
+(number rational 7 . 891)
+> (define p1 
+    (make-polynomial 
+     'x '((4 1) (3 -1) (2 -2) (1 2))))
+> (define p2 
+    (make-polynomial 
+     'x '((3 1) (1 -1))))
+> (repr p1)
+"[1]x^4 + [-1]x^3 + [-2]x^2 + [2]x^1"
+> (repr p2)
+"[1]x^3 + [-1]x^1"
+> (repr (greatest-common-divisor p1 p2))
+"[-1]x^2 + [1]x^1"
+```
+
+Давайте проверим что ответ действительно валидный:
+```
+x^4 - x^3 - 2 x^2 + 2 x = (x^2 - 2) (x^2 - x)
+x^3 - x = x (x + 1) (x - 1) = (x + 1) (x^2 - x)
+```
+
+Ну действительно уже ```x^2 - 2``` не имеет общих делителей с ```x + 1```. Поэтому ответ ```-x^2 + x``` — это справедливый вполне ответ.
