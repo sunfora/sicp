@@ -1355,7 +1355,7 @@
     (define (pow c t)
       (if (zero? t) 1 (mul c (pow c (dec t)))))
     (let ((c (pow (coeff (max-term b)) 
-                  (+ 1 (max-order a) (- (max-order b))))))
+                  (max 0 (+ 1 (max-order a) (- (max-order b)))))))
       (remainder-terms (mul-term (make-term 0 c) a) b)))
 
   (define (gcd-poly p1 p2)
