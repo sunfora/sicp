@@ -17,3 +17,6 @@
 
 ## Как немного подружить vim и racket
 * [repl](./extra/repl.md)
+
+## Пара идей по поводу потенциального языка
+* [devices](./extra/devices.md)
