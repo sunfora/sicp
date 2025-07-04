@@ -1009,3 +1009,301 @@ operations nobody knows that physically it is actually in different place and or
 поэтому вложенные регистры is almost always free
 поэтому что это просто оффсеты в типе
 а мы знаем размер типа
+
+## emem - to the rescue, code as a virtual memory device mapped to return-address register
+
+Я долго думал каким образом я могу хранить временные значения.
+В ассемблере когда мы храним временное значение мы перекидываем их напрямую в return address.
+
+Иначе говоря мы имеем регистр return-address куда мы пишем значение в итоге (после вычислений).
+В нашем случае return-address будет vmem регистром лисп машины куда мы закинем значение после выполнения функции.
+
+В общем что я хочу сказать. Можно сделать так.
+```
+(return-address/on-read (λ () ... {return-address computation-result}))
+```
+
+при этом сделать return-address - циклическим буфером
+теперь следите за руками
+
+помните у нас был синтаксис интересный?
+
+```
+(let arena (((byte 300) r)
+            ((byte 300) g)
+            ((byte 300) b))
+    ;; three channels
+    (reg (r g b) ((color256 c))
+        {outbuf c}))
+```
+
+тут есть конструкция по имени 
+```
+(reg (r g b) ...
+    )
+```
+
+которая в языке по сути выражает семантику того что мы рассматриваем discontinious memory regions as one united
+with new type color256 который мы удачно запишем в буфер как типа r g b кусочки памяти
+
+есть одна фундаментальная проблема
+что такое c.vmem?! откуда оно вообще у нас есть
+
+а вот в том и дело что об этом стоит думать скорее вот так
+```
+(let arena (((byte 300) r)
+            ((byte 300) g)
+            ((byte 300) b))
+    ;; three channels
+    (reg λ(r g b) ((color256 c))
+        {outbuf c}))
+```
+
+что такое λ(r g b)
+
+давайте разбираться
+
+
+```
+(let arena (((byte 300) r)
+            ((byte 300) g)
+            ((byte 300) b))
+    ;; three channels
+    (reg return-address.vmem ((color256 c)) ;; interpret return address register as color256 c register
+
+        ;; 1. get address where return-address contiguous space is mapped
+        ;; 2. create vmem of appropriate size right there
+        ;; 3. rewrite vmem register of return address register
+
+        [return-address.vmem (vmem <return-address.vmem> (sizeof color256)) ]
+
+        ;; loop return address infinitely
+        [return-address.vmem.cdr return-address.vmem]
+
+        ;; now we basically have really a place where c register resides
+        ;; the last bit is to write there vectorically 
+        ;; since function calls by default are vectorized
+        ;; we just make small emem on fly and write it to lambda (anonymous function register)
+        [lisp-machine.lambda 
+            (λ ((byte r) (byte g) (byte b))
+                {return-address.vmem r g b})]
+
+        ;; whenever we use c register now, we actually use this
+        ;; c === (lisp-machine.lambda r g b)
+
+        ;; or in other terms 
+        [c/read (λ () (lisp-machine.lambda r g b))]
+        ;; how it is invoked? 
+        ;; we use hidden vector cell param, which is used by invoked (lisp-machine.lambda r g b) expression
+        
+        ;; so now when you try to read it, it will iterate over r g b vectorically
+        ;; write 3 bytes to return-address and then we just read the memory from vmem mapped to c
+        ;; which is return-address.vmem
+        ;; so you basically generate things on fly and map directly to return-address space
+        ;; from there you read 
+
+        ;; you may ask what if many such emem reinterpretations are given
+        ;; well then you use return-address space as nested layout
+        ;;
+        ;; consider such, perfectly valid code
+        ;;
+        ;;  (reg λ(r g b) ((color256 c1))
+        ;;      (reg λ(b g r) ((color256 c2))
+        ;;          [out (+ c2 c1)]))
+        ;; 
+        ;; then return-address after the second reg would be remapped
+        ;; to sizeof(color256) + sizeof(color256) as a kind of tuple ((color256 c1) (color256 c2))
+        ;; each consequent lambda will write only its part
+        ;;
+        ;; return-address / shadowstack space is predefined on compilation time
+        ;; very much like stack, but it is remapped basically on every call
+        ;; more like tail recursion optimization, where you just reuse the same frame over and over
+        ;; and put there only the space we really need
+        ;; since it is iteration - we can realistically do it
+        ;; 
+        ;; if you never ever need allocations you have not asked - do not use emem
+        ;; as virtual memory device because it will do this
+        ;; do everything explicietly
+        ;; 
+        ;; but for many usecases 
+        ;; emem device is perfectly valid
+        ;; imagine for example some cryptography xor shift thing
+        ;; it will generate an infinite sequence 
+        ;; 
+        ;; sometimes when you write you can set return-address.vmem right there
+        ;; and generate even ligher code for my simple lisp-machine
+        ;;
+        ;; sometimes you can directly translate it to something appropriate
+        ;;
+        {outbuf c} ;; will trigger c/read lambda
+                   ;; basically replacing the inital thing with this
+                   ;; {outbuf (c/read)}
+                   ;; but it is harder as I said in case of c1 c2
+                   ;; there you would create a buff
+                   ;; and map result to outbuf.vmem only after 
+                   ;; {outbuf (+ c1 c2)}
+                   ;; basically 
+                   ;; (reg return-address.vmem ((color256 x) (color256 y))
+                   ;;      {outbuf (+ x y)})
+        ;; unbind // remove this crap
+        ...))
+```
+
+this is basically what happens with those emems virtual memory devices 
+expressions and types tend to be not so giant
+
+so unless you do some heavy macro expansions and expand to terrible terrible size of return-address.vmem 
+it will be just fine
+
+## multiple return values
+also as you have noticed this lisp as common lisp and racket will provide multiple return values
+this mechanism was used to create value register over emem lambdas
+
+## контроль за вызовами функций
+
+ реинтерпретация крайне дешевая в итоге получилась по идее
+
+потому что мы всегда знаем в точности где сейчас находится vmem и куда мы пишем
+
+
+регистры в итоге получились чисто синтаксической вещью
+
+всё остальное либо работает через return-address.vmem
+
+либо мы знаем где оно в данный момент находится, какой конкретно vmem мы используем для интерпретации
+
+
+даже в замыканиях это верно
+
+по умолчанию лямбды использую stack
+
+но можно на самом деле упороться и использовать тот же фрейм
+
+
+возможно это будет делаться специальной формой
+
+
+(ε device ((func ... args) values)
+
+.. potentially do something with values)
+
+
+короче по умолчанию (func ... args)
+
+как и let без указания - использует default allocаtor = stack
+
+для переданных аргументов и для return-values
+
+
+но потенциально можно будет использовать другой девайс например gc для каких-то ленивых вычислений на куче с бесконечной рекурсией
+
+и можно заместо стека положить reuse-frame девайс
+
+который будет подобно tail recursion elimination
+
+напрямую переиспользовать фрейм
+
+
+это зависит от программиста что он делает и почему 
+
+ну это как раз реальный настоящий zero-cost abstraction
+
+ты по сути можешь провалиться напрямую в чуть ли не ассемблер, но при этом на самом деле одновременно повысить чуть ли не до хаскеля
+
+
+lazy-gc например 
+
+ну типа я смогу писать будто я на лиспе обычном
+
+с gc, а если stack-а не будет хватать и надо будет сделать бесконечную рекурсию
+
+
+ты просто оборачиваешь какой-нибудь dfs
+
+с (parametrize default-function-allocator gc
+
+(dfs ...) )
+
+
+и он почесал там короче считать 
+
+ просто в обычных языках тебе потребуется сменить компилятор
+
+
+тут как бы тоже не все будут поддерживать gc как девайс (в том и прелесть, embeded разработка будет в восторге: выключить всё ненужное, написать простой понятный компилятор/интерпретатор, который позволяет почти вообще не использовать лишних аллокаций даже при вызове функций, даже на стэке эдакий NASA level of control)
+
+
+но многие реализации (во всяком случае дефолтная - будет)
+
+аналогично gc вряд ли нужен в операционной системе
+
+но очень нужен для научной работы
+
+
+самое важное не всегда нужны векторные операции
+
+как бы часто мы по старинке любим
+
+pan - поддерживает это, если лейаут точно мапится в размеры vmem - никаких векторных операций
+
+
+но стоит чуть расширить и вы тот же самый код с тем же самым лейаутом уже используете как вектора
+
+
+это же не прелесть?
+
+## emem получает на вход только vmem
+
+до меня допёрло что такое 
+
+```
+(λ ( (int32 x) (int32 y) (int32 z) )
+    ...)
+```
+
+ничто вам эта ерунда не напоминает (аргументы функции)
+это лейаут чёрт возьми
+
+на самом деле единственный аргумет который получает лямбда - vmem
+это позволяет нам делать функции с бесконечным числом аргументов и прочее дерьмо
+
+короче это то же самое что
+```
+(λ vmem 
+   (reg vmem ( (int32 x) (int32 y) (int32 z) )
+        ...))
+```
+
+в конечном счёте функция принимает vmem откуда читает
+и имеет vmem куда в итоге пишет
+
+что такое композиция функций?
+это когда return = input
+
+f.return = g.input vmem
+
+(f (g vmem))
+
+проблема в том что композиция функций должна где-то хранить эти intermediate results
+либо не хранить и колапсировать их
+
+на помощь приходит концепция девайса
+именно он аллоцирует vmem куда функция будет писать параметры
+
+
+допустим у нас три вызова функций (a (b (c vmem)))
+
+с на вход получает vmem - ей ничего не нужно
+b на вход должа получить return-values с
+
+для этого девайс аллоцирует return-values vmem и привязывает их к c
+после чего b может спокойно привязать в свой регистр return-values регистр лямбды
+
+получается такая цепочка
+a device b device c vmem
+
+последнее значение можно и не аллоцировать на самом деле если мы привяжемся и будем куда-то писать напрямую
+иначе нам надо опять будет использовать device
+
+в общем всё понятно, можно объявить что let как в scheme это просто тоже композиция анонимных функций
+поверх девайса-аллокатора просто синтаксический сахар для emem лямбд
