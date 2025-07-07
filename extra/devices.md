@@ -1564,3 +1564,41 @@ trying to assign ((byte) (byte) (byte) (byte)) to (((byte) (byte) (byte)) regist
 
 всё остальное особо трекать на самом деле не надо, потому что мы заместо индивидуальных байтов там и gc
 будем сразу управлять памятью на уровне скорее фреймов функций - это гораздо важнее и гораздо в итоге быстрее
+
+## events are nothing but shift of executor perspective
+
+так как emem содержит в своём заголовке не только ссылку на исполняемый код но и на девайс
+по сути евент-хендлер irq например - это регистр где лежит на какой девайс надо переключиться в случае если случилось что-то
+
+по сути система языка Pan видит мир разными глазами - в зависимости от того кто сейчас исполняется
+реально то что по умолчанию доступно emem - её фрейм
+это по сути и есть виртуальное адресное пространство emem с которым она может рабоать
+
+emem также видит frame-provider, в случае если ей захочется добавить фрейм
+а так же остальные девайсы которые к ней подключены через vmem на фрейме
+
+таким образом когда нас прерывает - мы просто видим мир с точки зрения девайса на который переключились
+и его текущий фрейм и историю релевантных вызовов (vmem)
+
+поэтому например концептуально что такое division by zero?
+это
+
+basically
+
+```
+;; this is conceptual code
+;; the real one would be compiled to simd or something appropriate in case of vectorized access
+;; it will recast raw vmem to chunks and use simd inside
+;; this is the power of compiler optimizer hooks
+
+(define (/ (int32 x) (int32 y))
+    (if (= y 0)
+        (math.division-by-zero) ; the execution is handed to division-by-zero emem 
+                                ; which is by default a user that further lends control to debugger
+                                ; debugger then stops the threads and much much more
+        ((λ x86-64-cpu nil ()
+            (x86-64-cpu/mov x86-64-cpu.eax x)  ;; this is a free function it directly manipulates registers
+            (x86-64-cpu/mov x86-64-cpu.ebx y)  ;; we can also set emem directly inside processor interrupt vector table
+            (x86-64-cpu/div x y)))))           ;; or inside linux handlers, whatever os we have
+                                               ;; the cpu interrupt vector table
+```
